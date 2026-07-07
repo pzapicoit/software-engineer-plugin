@@ -94,9 +94,16 @@ flowchart TD
    ```
    Escribe `.intermarkit/task-metrics/{PROJ-XXX}.json` (con `Write`):
    ```json
-   {"issue_key": "PROJ-XXX", "started_at": "<ISO 8601 UTC>", "tool_calls": 0}
+   {
+     "issue_key": "PROJ-XXX",
+     "started_at": "<ISO 8601 UTC>",
+     "tool_calls": 0,
+     "tokens": {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "turns": 0}
+   }
    ```
-   Escribe el pointer `.intermarkit/task-metrics/.active` con el nombre del fichero (`{PROJ-XXX}.json`). Esto hace que el hook `postToolUse` sea O(1).
+   Los hooks del plugin acumulan automaticamente sobre este esquema (ver `agents/reference.md` §Metricas de tarea): `postToolUse` incrementa `tool_calls` en vivo; `stop` acumula `tokens.*` y `turns` cada vez que el agente responde; `preCompact` registra `context_peak` en cada compactacion; `sessionEnd` marca `finished_at`/`elapsed_ms` al cerrarse el chat.
+
+   Escribe el pointer `.intermarkit/task-metrics/.active` con el nombre del fichero (`{PROJ-XXX}.json`). Esto habilita el modo O(1) de los hooks.
 
 **Atajo:** `/im-take PROJ-XXX` ejecuta esta fase completa.
 
@@ -125,10 +132,12 @@ flowchart TD
     - Aplica con `editJiraIssue` (`fields: {"description": "..."}`, `contentFormat: "markdown"`).
     - No marques criterios "a medias".
 16. **Transicionar Jira a "In Testing"** — misma mecanica que Fase A paso 2 (usa cache de transiciones).
-17. **Calcular metricas**:
-    - Tiempo: lee `started_at` de `.intermarkit/task-metrics/{PROJ-XXX}.json`, compara con `date -u +%Y-%m-%dT%H:%M:%SZ`. No dependas de `elapsed_minutes` (el hook `stop` lo rellena despues).
-    - Tool calls: lee `tool_calls` del mismo fichero (contador en vivo del hook `postToolUse`).
-18. **Comentario Jira** — `addCommentToJiraIssue` con la plantilla de `reference.md §Plantilla de comentario Jira`. No incluyas tokens/contexto.
+17. **Calcular metricas** — lee `.intermarkit/task-metrics/{PROJ-XXX}.json`:
+    - Tiempo: compara `started_at` con `date -u +%Y-%m-%dT%H:%M:%SZ`. No dependas de `elapsed_ms` (el hook `sessionEnd` lo rellena al cerrarse el chat, no antes).
+    - Tool calls: `tool_calls` (contador en vivo del hook `postToolUse`).
+    - Tokens: bloque `tokens` acumulado por el hook `stop` en cada turno (`input`, `output`, `cache_read`, `cache_write`, `turns`). Estos son los tokens de TODOS los turnos previos; el turno actual (el que va a escribir este comentario) todavia no esta contabilizado — es una aproximacion inferior aceptable.
+    - Contexto (opcional): si existe `context_peak`, ese es el pico maximo observado durante la tarea (solo se registra cuando Cursor compacta el contexto).
+18. **Comentario Jira** — `addCommentToJiraIssue` con la plantilla de `reference.md §Plantilla de comentario Jira`. Incluye tiempo, tool calls, tokens (formateados como M/K) y context peak si existe.
 19. **Borrar pointer** — `rm .intermarkit/task-metrics/.active` (via Shell). Esto le indica al hook `postToolUse` que ya no hay tarea activa.
 20. **Confirmar cierre** al usuario.
 21. **Sugerir chat nuevo** para la siguiente tarea Jira distinta (regla §0.1).
@@ -146,7 +155,7 @@ flowchart TD
 7. Nunca implementar sin docs de arquitectura (skill `architect` primero).
 8. Una tarea Jira por conversacion — tras cerrar, chat nuevo para la siguiente.
 9. Nunca marcar un criterio de aceptacion sin verificarlo.
-10. Nunca inventar metricas de tokens/contexto — solo tiempo (por timestamp) y tool calls (contador real).
+10. Solo reportar metricas que provengan del fichero `.intermarkit/task-metrics/{PROJ-XXX}.json` (tiempo por timestamp, tool_calls del hook `postToolUse`, tokens acumulados por el hook `stop`, context_peak del hook `preCompact`). Nunca inventar valores; si un campo esta ausente en el fichero, omitelo del comentario en vez de estimarlo.
 11. Antes de llamar a `atlassianUserInfo`, `getTransitionsForJiraIssue` o `bitbucketWorkspace`, consulta la cache local (§7 de la regla). Tras cualquier llamada exitosa, actualizala.
 
 ## Principios de ingenieria

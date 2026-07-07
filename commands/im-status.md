@@ -16,7 +16,10 @@ Resumen del estado actual sin hacer cambios ni llamadas MCP. Solo lee ficheros l
      - `issue_key`
      - `started_at` (ISO)
      - Tiempo transcurrido calculado en minutos (`now - started_at`, con `date -u`)
-     - `tool_calls` (contador en vivo)
+     - `tool_calls` (contador en vivo del hook `postToolUse`)
+     - `tokens.input` / `output` / `cache hit %` / `turns` si el bloque `tokens` existe (acumulado por el hook `stop`). Formato M/K.
+     - `context_peak.tokens` / `percent` si existe (hook `preCompact`).
+     - `last_model` y `cursor_version` si estan.
    - Si no existe pointer, informa "sin tarea activa".
 4. **Estado cache MCP** — para cada fichero en `.intermarkit/cache/`:
    - `atlassian-user.json` (TTL 30d)
@@ -36,10 +39,14 @@ Presenta como una tabla o lista markdown compacta, priorizando lo relevante:
 **Proyecto:** PROJ (bitbucket / intermarkithub / rama default: main)
 **Rama actual:** feature/PROJ-42-auth-login
 **Tarea activa:** PROJ-42 · iniciada hace 45 min · 87 tool calls
+**Tokens:** input 1.9M · output 10K · cache hit 77% · turns 3
+**Context peak:** 120K tokens (85% del window), 2 compactaciones
 **Cambio OpenSpec:** PROJ-42-add-auth (12/18 tareas)
 **Docs:** architecture.md ok, functional.md ok
 **Cache MCP:** user_info fresh (28d restantes), transitions.PROJ fresh (6d), bitbucket_verified stale
 ```
+
+Omite las lineas de `Tokens` y `Context peak` si el fichero no las tiene (tarea recien empezada o Cursor no ha disparado aun los hooks correspondientes).
 
 ## Nota
 

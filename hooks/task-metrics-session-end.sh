@@ -1,29 +1,26 @@
 #!/bin/bash
-# Hook stop: se dispara al final de CADA turno del agente (no al cierre del chat).
+# Hook sessionEnd: se dispara cuando la conversacion completa termina (cierre de ventana,
+# usuario cierra el chat, error, etc.). Es la fuente OFICIAL y fiable de duracion total.
 #
-# Acumula en el fichero de metricas de la tarea activa:
-#   - tokens.input / output / cache_read / cache_write (sumatorios)
-#   - tokens.turns (numero de turnos observados)
-#   - last_stop_status (completed / aborted / error)
-#   - model observado (informativo, ultimo turno)
+# Payload documentado por Cursor:
+#   session_id
+#   reason (completed / aborted / error / window_close / user_close)
+#   duration_ms
+#   is_background_agent
+#   final_status
+#   error_message (si aplica)
 #
-# IMPORTANTE: este hook NO marca finished_at ni elapsed_ms. Esa semantica corresponde
-# al hook sessionEnd (fin del chat) o al agente cuando ejecuta /im-close (Fase C).
+# Marca en el fichero de metricas de la tarea activa:
+#   finished_at        (ISO 8601 UTC, calculado ahora)
+#   elapsed_ms         (duration_ms del payload, fiable)
+#   session_end_reason (reason del payload)
+#   final_status       (final_status del payload)
 #
-# Fields del payload real de Cursor (verificado en v3.10.17):
-#   input_tokens        - total del turno (incluye cache_read + cache_write + fresh)
-#   output_tokens       - tokens generados en la respuesta
-#   cache_read_tokens   - leidos de la cache (baratos)
-#   cache_write_tokens  - escritos a la cache
-#   status              - completed / aborted / error
-#   loop_count
-#   model / model_id / model_params
-#   conversation_id / generation_id / session_id
-#   hook_event_name = "stop"
-#   cursor_version
-#   workspace_roots / user_email / transcript_path
+# NO borra el pointer .active — la tarea Jira puede seguir viva aunque el chat se cierre;
+# el usuario puede continuar en otra conversacion. El pointer se limpia SOLO cuando el
+# agente ejecuta la Fase C (/im-close) o el usuario lo hace manualmente.
 #
-# Fail-open: log de errores en .intermarkit/task-metrics/.hooks.log, exit 0 siempre.
+# Fail-open: log en .intermarkit/task-metrics/.hooks.log, exit 0 siempre.
 
 METRICS_DIR=".intermarkit/task-metrics"
 
@@ -61,7 +58,7 @@ def log_error(msg: str) -> None:
             log_file.rename(backup)
         ts = datetime.now(timezone.utc).isoformat()
         with log_file.open("a", encoding="utf-8") as f:
-            f.write(f"[{ts}] stop: {msg}\n")
+            f.write(f"[{ts}] sessionEnd: {msg}\n")
     except OSError:
         pass
 
@@ -100,7 +97,7 @@ def find_active() -> Path | None:
     return best
 
 
-def read_hook_payload() -> dict:
+def read_payload() -> dict:
     try:
         raw = input_file.read_text(encoding="utf-8")
         return json.loads(raw) if raw.strip() else {}
@@ -108,7 +105,7 @@ def read_hook_payload() -> dict:
         return {}
 
 
-def accumulate(fpath: Path, payload: dict) -> None:
+def close_session(fpath: Path, payload: dict) -> None:
     try:
         with fpath.open("r+", encoding="utf-8") as f:
             fcntl.flock(f.fileno(), fcntl.LOCK_EX)
@@ -117,31 +114,38 @@ def accumulate(fpath: Path, payload: dict) -> None:
                 raw = f.read()
                 data = json.loads(raw) if raw.strip() else {}
 
-                tokens = data.get("tokens") or {
-                    "input": 0,
-                    "output": 0,
-                    "cache_read": 0,
-                    "cache_write": 0,
-                    "turns": 0,
-                }
-                for src, dst in (
-                    ("input_tokens", "input"),
-                    ("output_tokens", "output"),
-                    ("cache_read_tokens", "cache_read"),
-                    ("cache_write_tokens", "cache_write"),
-                ):
-                    value = payload.get(src)
-                    if isinstance(value, (int, float)):
-                        tokens[dst] = int(tokens.get(dst, 0)) + int(value)
-                tokens["turns"] = int(tokens.get("turns", 0)) + 1
-                data["tokens"] = tokens
+                if data.get("finished_at"):
+                    return
 
-                if payload.get("status"):
-                    data["last_stop_status"] = payload["status"]
-                if payload.get("model"):
-                    data["last_model"] = payload["model"]
-                if payload.get("cursor_version") and not data.get("cursor_version"):
-                    data["cursor_version"] = payload["cursor_version"]
+                now = datetime.now(timezone.utc)
+                data["finished_at"] = now.isoformat()
+
+                duration_ms = payload.get("duration_ms")
+                if isinstance(duration_ms, (int, float)):
+                    data["elapsed_ms"] = int(duration_ms)
+                    data["elapsed_minutes"] = round(duration_ms / 60000, 1)
+                else:
+                    try:
+                        started_raw = data.get("started_at", now.isoformat())
+                        started = datetime.fromisoformat(
+                            started_raw.replace("Z", "+00:00")
+                        )
+                        if started.tzinfo is None:
+                            started = started.replace(tzinfo=timezone.utc)
+                        elapsed_seconds = (now - started).total_seconds()
+                        data["elapsed_ms"] = int(elapsed_seconds * 1000)
+                        data["elapsed_minutes"] = round(elapsed_seconds / 60, 1)
+                    except (ValueError, AttributeError) as exc:
+                        log_error(f"elapsed calc fallo: {exc}")
+
+                for src, dst in (
+                    ("reason", "session_end_reason"),
+                    ("final_status", "final_status"),
+                    ("session_id", "session_id"),
+                    ("is_background_agent", "is_background_agent"),
+                ):
+                    if payload.get(src) is not None:
+                        data[dst] = payload[src]
 
                 f.seek(0)
                 f.truncate()
@@ -149,12 +153,12 @@ def accumulate(fpath: Path, payload: dict) -> None:
             finally:
                 fcntl.flock(f.fileno(), fcntl.LOCK_UN)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
-        log_error(f"accumulate fallo en {fpath}: {exc}")
+        log_error(f"close_session fallo en {fpath}: {exc}")
 
 
 active = find_active()
 if active is not None:
-    accumulate(active, read_hook_payload())
+    close_session(active, read_payload())
 PYEOF
 
 rm -f "$tmp_input"

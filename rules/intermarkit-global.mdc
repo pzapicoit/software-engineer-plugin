@@ -161,10 +161,23 @@ Para ahorrar llamadas MCP repetitivas, el agente cachea localmente respuestas es
 - **Skill `python-development`** — usar siempre que se escribe/revise/refactorice codigo Python.
 - **Subagente `adversarial-reviewer`** — obligatorio tras `/opsx-apply` + `/opsx-verify`, antes de `/opsx-archive` (salvo excepciones §3).
 
+## 8bis. Hooks y metricas de tarea
+
+El plugin registra automaticamente 4 tipos de metricas en `.intermarkit/task-metrics/{ISSUE_KEY}.json` (schema completo en `agents/reference.md` §Metricas de tarea):
+
+| Metrica | Hook | Cuando se actualiza | Fiable en Fase C? |
+|---|---|---|---|
+| `tool_calls` | `postToolUse` | Cada llamada a herramienta | Si |
+| `tokens.{input,output,cache_read,cache_write,turns}` | `stop` | Al final de cada turno del agente | Si (cota inferior: falta el turno del propio comentario Jira) |
+| `context_peak` | `preCompact` | Cada vez que Cursor compacta el contexto | Solo si hubo al menos una compactacion |
+| `finished_at`, `elapsed_ms` | `sessionEnd` | Al cerrarse el chat completo | NO — el hook se dispara despues del comentario Jira. El agente calcula el tiempo dedicado por timestamp (`started_at` vs `now`). |
+
+Regla practica para el comentario Jira: incluir tiempo (por timestamp), tool_calls, tokens y context_peak si existen. No inventar cifras — si `tokens.turns == 0`, omitir esas lineas.
+
 ## 9. Comandos propios del plugin
 
 - `/im-take {ISSUE_KEY}` — ejecuta Fase A completa.
 - `/im-close` — ejecuta Fase C completa.
-- `/im-status` — resumen del estado (tarea activa, rama, tiempo, tool calls).
+- `/im-status` — resumen del estado (tarea activa, rama, tiempo, tool calls, tokens, context peak).
 
 Los comandos son atajos que expanden pasos concretos del workflow. El agente sigue las mismas reglas.

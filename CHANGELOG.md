@@ -2,6 +2,45 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). Versiones semanticas.
 
+## [0.3.1] — 2026-07-07
+
+### Added
+
+- **Hook `sessionEnd`** (`hooks/task-metrics-session-end.sh`) — marca `finished_at`, `elapsed_ms` y `elapsed_minutes` en el fichero de metricas de la tarea activa usando `duration_ms` del payload oficial de Cursor. Es la fuente **fiable** de duracion total, no una aproximacion por timestamp. Registra ademas `session_end_reason`, `final_status`, `session_id` e `is_background_agent`. NO borra el pointer `.active` — permite continuar la tarea Jira en otro chat.
+- **Hook `preCompact`** (`hooks/task-metrics-compact.sh`) — cada vez que Cursor compacta el contexto por presion del window, registra el `context_peak` con `tokens`, `percent`, `window_size` y `compactions`. Mantiene el pico maximo observado durante la tarea. Es la fuente mas fiable de uso real de contexto.
+- **Metricas de tokens reales** — el hook `stop` ahora acumula `tokens.input`, `tokens.output`, `tokens.cache_read`, `tokens.cache_write` y `tokens.turns` en cada turno del agente. Usa los campos reales del payload de Cursor (`input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens`) verificados en Cursor v3.10.17.
+- **Campos informativos**: `last_stop_status`, `last_model`, `cursor_version` en el fichero de metricas.
+- Seccion "Metricas de tarea" en el README con tabla de fuentes y fiabilidad.
+- Seccion §8bis en la regla global (`intermarkit-global.mdc`) con la tabla de hooks/metricas y regla practica para el comentario Jira.
+- Plantilla de comentario Jira ampliada en `agents/reference.md` con lineas de **Tokens** (formato M/K + cache hit %) y **Context peak** (opcional).
+- Schema del fichero de metricas documentado completo en `agents/reference.md` §Metricas de tarea (con tabla de origen de cada campo).
+
+### Changed
+
+- **`hooks/task-metrics-stop.sh` reescrito** — ya NO marca `finished_at` (era incorrecto: el hook se dispara en CADA turno del agente, no al final del chat). Ahora acumula tokens sin cerrar la tarea. La semantica de cierre corresponde a `sessionEnd` (chat cerrado) o al agente cuando ejecuta `/im-close` (Fase C).
+- **Fase C paso 17 (`software-engineer.md`)** — incluye instrucciones para leer y formatear tokens y context peak. El comentario Jira los reporta si estan disponibles.
+- **Regla inquebrantable #10** — actualizada: en lugar de "nunca inventar metricas de tokens", ahora es "solo reportar metricas provenientes del fichero de metricas, omitir campos ausentes".
+- **`commands/im-take.md`** — el fichero JSON inicial incluye el bloque `tokens` vacio para que los hooks acumulen sobre estructura conocida.
+- **`commands/im-close.md`** — Fase C paso 7-8 incluye lectura y formateo de tokens/context_peak.
+- **`commands/im-status.md`** — muestra tokens y context peak si existen.
+- **`.cursor-plugin/plugin.json`** — bump a 0.3.1, descripcion actualizada.
+
+### Verified
+
+Payload real de Cursor v3.10.17 capturado con hook temporal de debug. Fields confirmados en `stop`:
+```json
+{
+  "status": "completed", "loop_count": 0,
+  "input_tokens": 1947096, "output_tokens": 10348,
+  "cache_read_tokens": 1506478, "cache_write_tokens": 440604,
+  "model": "...", "model_id": "...", "cursor_version": "3.10.17",
+  "conversation_id": "...", "generation_id": "...", "session_id": "...",
+  "transcript_path": "..."
+}
+```
+
+Los 3 hooks nuevos (`stop` reescrito, `sessionEnd`, `preCompact`) probados end-to-end con simulaciones de payload: acumulacion de tokens en 2 turnos consecutivos, `context_peak` que conserva maximo pero incrementa `compactions`, y cierre con `duration_ms` fiable. Sin errores en `.hooks.log`.
+
 ## [0.3.0] — 2026-07-07
 
 ### Added

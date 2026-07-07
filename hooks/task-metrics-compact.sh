@@ -1,29 +1,20 @@
 #!/bin/bash
-# Hook stop: se dispara al final de CADA turno del agente (no al cierre del chat).
+# Hook preCompact: se dispara cuando Cursor va a compactar el contexto por presion
+# del context window. Es la MEJOR fuente de datos sobre uso real de contexto.
 #
-# Acumula en el fichero de metricas de la tarea activa:
-#   - tokens.input / output / cache_read / cache_write (sumatorios)
-#   - tokens.turns (numero de turnos observados)
-#   - last_stop_status (completed / aborted / error)
-#   - model observado (informativo, ultimo turno)
+# Payload documentado por Cursor:
+#   trigger              (auto / manual)
+#   context_usage_percent
+#   context_tokens
+#   context_window_size
+#   message_count
+#   messages_to_compact
+#   is_first_compaction
 #
-# IMPORTANTE: este hook NO marca finished_at ni elapsed_ms. Esa semantica corresponde
-# al hook sessionEnd (fin del chat) o al agente cuando ejecuta /im-close (Fase C).
+# Registra en context_peak del fichero de metricas de la tarea activa el punto de mayor
+# uso observado durante la tarea (no se sobreescribe si un pico posterior es menor).
 #
-# Fields del payload real de Cursor (verificado en v3.10.17):
-#   input_tokens        - total del turno (incluye cache_read + cache_write + fresh)
-#   output_tokens       - tokens generados en la respuesta
-#   cache_read_tokens   - leidos de la cache (baratos)
-#   cache_write_tokens  - escritos a la cache
-#   status              - completed / aborted / error
-#   loop_count
-#   model / model_id / model_params
-#   conversation_id / generation_id / session_id
-#   hook_event_name = "stop"
-#   cursor_version
-#   workspace_roots / user_email / transcript_path
-#
-# Fail-open: log de errores en .intermarkit/task-metrics/.hooks.log, exit 0 siempre.
+# Fail-open: log en .intermarkit/task-metrics/.hooks.log, exit 0 siempre.
 
 METRICS_DIR=".intermarkit/task-metrics"
 
@@ -61,7 +52,7 @@ def log_error(msg: str) -> None:
             log_file.rename(backup)
         ts = datetime.now(timezone.utc).isoformat()
         with log_file.open("a", encoding="utf-8") as f:
-            f.write(f"[{ts}] stop: {msg}\n")
+            f.write(f"[{ts}] preCompact: {msg}\n")
     except OSError:
         pass
 
@@ -100,7 +91,7 @@ def find_active() -> Path | None:
     return best
 
 
-def read_hook_payload() -> dict:
+def read_payload() -> dict:
     try:
         raw = input_file.read_text(encoding="utf-8")
         return json.loads(raw) if raw.strip() else {}
@@ -108,7 +99,14 @@ def read_hook_payload() -> dict:
         return {}
 
 
-def accumulate(fpath: Path, payload: dict) -> None:
+def record_peak(fpath: Path, payload: dict) -> None:
+    tokens = payload.get("context_tokens")
+    percent = payload.get("context_usage_percent")
+    window = payload.get("context_window_size")
+
+    if not isinstance(tokens, (int, float)):
+        return
+
     try:
         with fpath.open("r+", encoding="utf-8") as f:
             fcntl.flock(f.fileno(), fcntl.LOCK_EX)
@@ -117,31 +115,21 @@ def accumulate(fpath: Path, payload: dict) -> None:
                 raw = f.read()
                 data = json.loads(raw) if raw.strip() else {}
 
-                tokens = data.get("tokens") or {
-                    "input": 0,
-                    "output": 0,
-                    "cache_read": 0,
-                    "cache_write": 0,
-                    "turns": 0,
-                }
-                for src, dst in (
-                    ("input_tokens", "input"),
-                    ("output_tokens", "output"),
-                    ("cache_read_tokens", "cache_read"),
-                    ("cache_write_tokens", "cache_write"),
-                ):
-                    value = payload.get(src)
-                    if isinstance(value, (int, float)):
-                        tokens[dst] = int(tokens.get(dst, 0)) + int(value)
-                tokens["turns"] = int(tokens.get("turns", 0)) + 1
-                data["tokens"] = tokens
+                previous = data.get("context_peak") or {}
+                previous_tokens = previous.get("tokens", 0)
+                compactions = int(previous.get("compactions", 0)) + 1
 
-                if payload.get("status"):
-                    data["last_stop_status"] = payload["status"]
-                if payload.get("model"):
-                    data["last_model"] = payload["model"]
-                if payload.get("cursor_version") and not data.get("cursor_version"):
-                    data["cursor_version"] = payload["cursor_version"]
+                if tokens >= previous_tokens:
+                    data["context_peak"] = {
+                        "tokens": int(tokens),
+                        "percent": float(percent) if isinstance(percent, (int, float)) else None,
+                        "window_size": int(window) if isinstance(window, (int, float)) else None,
+                        "recorded_at": datetime.now(timezone.utc).isoformat(),
+                        "compactions": compactions,
+                    }
+                else:
+                    previous["compactions"] = compactions
+                    data["context_peak"] = previous
 
                 f.seek(0)
                 f.truncate()
@@ -149,12 +137,12 @@ def accumulate(fpath: Path, payload: dict) -> None:
             finally:
                 fcntl.flock(f.fileno(), fcntl.LOCK_UN)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
-        log_error(f"accumulate fallo en {fpath}: {exc}")
+        log_error(f"record_peak fallo en {fpath}: {exc}")
 
 
 active = find_active()
 if active is not None:
-    accumulate(active, read_hook_payload())
+    record_peak(active, read_payload())
 PYEOF
 
 rm -f "$tmp_input"

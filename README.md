@@ -16,7 +16,9 @@ Plugin de Cursor para desarrolladores de IntermarkIt. Integra normas de trabajo 
 - **MCP Atlassian** (`mcp.json`) — servidor oficial `https://mcp.atlassian.com/v1/mcp/authv2`. Cubre Jira, Confluence y **Bitbucket Cloud** (PRs, branches, pipelines, repos).
 - **Hook `sessionStart`** — inyecta contexto de proyecto + pre-checks (credentials, docs, openspec, tarea activa, estado cache MCP) al inicio de cada sesion. Evita 4-6 tool calls repetitivos.
 - **Hook `postToolUse`** — incrementa `tool_calls` en la tarea activa. O(1) via pointer `.active`, con lock (`fcntl.flock`) para tool calls concurrentes.
-- **Hook `stop`** — cierre local: `finished_at`, `elapsed_minutes`, `context_usage` si Cursor lo expone. Registro historico, no alimenta el comentario Jira del mismo turno.
+- **Hook `stop`** — al final de cada turno del agente acumula tokens reales (`input`, `output`, `cache_read`, `cache_write`) y cuenta de turnos. Los campos vienen del payload real de Cursor (v3.10.17+): `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens`. Ya no marca `finished_at` — esa semantica corresponde a `sessionEnd`.
+- **Hook `sessionEnd`** — al cerrarse la conversacion marca `finished_at`/`elapsed_ms` usando `duration_ms` del payload de Cursor (fiable). Registro historico local; no borra el pointer `.active` para permitir continuar la tarea en otro chat.
+- **Hook `preCompact`** — cada vez que Cursor compacta el contexto por presion del window, registra el `context_peak` (tokens, porcentaje, window size) y cuenta compactaciones. Es la mejor fuente de datos sobre uso real de contexto.
 - **Cache MCP local (`.intermarkit/cache/`)** — respuestas estables cacheadas con TTL: `atlassian-user.json` (30d), `jira-transitions-{PROJECT}.json` (7d), `bitbucket-verified.json` (24h). El agente lee la cache antes de llamar al MCP y la actualiza tras cada llamada exitosa.
 
 ## Como se activa
@@ -96,9 +98,22 @@ Diseno explicito para reducir tokens y llamadas MCP:
 - **Regla global unica** — el agente NO duplica la cascada; delega en la regla `intermarkit-global.mdc`. Reduccion ~40% de contexto en el agente respecto a v0.2.
 - **Hook `sessionStart` con pre-checks** — devuelve `config_exists`, `credentials_global_exists`, `architecture_docs_exists`, `openspec_initialized`, `active_task` y estado de la cache MCP. El agente evita 4-6 tool calls al inicio de cada chat.
 - **Cache MCP local** — `atlassianUserInfo` (30d), transiciones Jira por proyecto (7d), verificacion Bitbucket (24h). Ahorra 3-5 llamadas MCP por tarea Jira completa.
-- **Pointer `.active`** — el hook `postToolUse` pasa de O(n) (escaneando todos los JSON) a O(1) (leyendo un solo pointer).
+- **Pointer `.active`** — los hooks pasan de O(n) (escaneando todos los JSON) a O(1) (leyendo un solo pointer).
 
 Detalles del schema de cache y ejemplos: [`agents/reference.md`](agents/reference.md#cache-mcp-schema).
+
+## Metricas de tarea
+
+Cada tarea Jira genera `.intermarkit/task-metrics/{ISSUE_KEY}.json` con datos recolectados **automaticamente por los hooks del plugin** (sin trabajo del agente ni llamadas MCP):
+
+| Metrica | Fuente | Fiable |
+|---|---|---|
+| Tool calls | Hook `postToolUse` (incremento en vivo) | Si |
+| Tokens (input/output/cache_read/cache_write/turns) | Hook `stop` (payload real de Cursor v3.10.17+: `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens`) | Si, cota inferior — el turno actual (el que escribe el comentario Jira) no esta contabilizado |
+| Context peak | Hook `preCompact` (`context_tokens`, `context_usage_percent`, `context_window_size`) | Solo si Cursor compacta el contexto al menos una vez |
+| Tiempo dedicado | Agente en Fase C: `started_at` vs `now` (por timestamp). El hook `sessionEnd` rellena `elapsed_ms` a posteriori usando `duration_ms` del payload | Si |
+
+El comentario Jira de cierre de tarea (`/im-close`) refleja todas estas metricas cuando estan disponibles y las omite silenciosamente cuando no.
 
 ## Estructura
 
@@ -123,9 +138,11 @@ software-engineer-plugin/
 │   ├── im-close.md
 │   └── im-status.md
 ├── hooks/
-│   ├── session-context.sh      # pre-checks + JSON payload
-│   ├── task-metrics-tooluse.sh # O(1) + flock
-│   └── task-metrics-stop.sh    # cierre + limpieza .active
+│   ├── session-context.sh          # pre-checks + JSON payload (sessionStart)
+│   ├── task-metrics-tooluse.sh     # incrementa tool_calls (postToolUse, O(1) + flock)
+│   ├── task-metrics-stop.sh        # acumula tokens por turno (stop)
+│   ├── task-metrics-session-end.sh # marca finished_at/elapsed_ms (sessionEnd)
+│   └── task-metrics-compact.sh     # registra context_peak (preCompact)
 ├── scripts/
 │   └── lint.sh                 # smoke checks del plugin
 ├── hooks.json
@@ -141,7 +158,18 @@ software-engineer-plugin/
 - `.intermarkit/config.yaml` — configuracion (commiteable, define el proyecto).
 - `.intermarkit/architecture.md` — stack + arquitectura (commiteable, generado por la skill `architect`).
 - `.intermarkit/functional.md` — documentacion funcional (commiteable, generado por la skill `architect`).
-- `.intermarkit/task-metrics/*.json` — metricas por tarea (local, NO commitear).
+- `.intermarkit/task-metrics/{ISSUE_KEY}.json` — metricas por tarea con schema:
+  ```json
+  {
+    "issue_key": "PROJ-42",
+    "started_at": "2026-07-07T20:00:00Z",
+    "tool_calls": 42,
+    "tokens": {"input": 1947096, "output": 10348, "cache_read": 1506478, "cache_write": 440604, "turns": 3},
+    "context_peak": {"tokens": 120000, "percent": 85, "window_size": 128000, "compactions": 2},
+    "finished_at": "...", "elapsed_ms": 5400000,
+    "last_model": "claude-sonnet-5", "cursor_version": "3.10.17"
+  }
+  ```
 - `.intermarkit/task-metrics/.active` — pointer a tarea activa (local, NO commitear).
 - `.intermarkit/task-metrics/.hooks.log` — log de errores de hooks (local, NO commitear).
 - `.intermarkit/cache/*.json` — cache MCP local (local, NO commitear).

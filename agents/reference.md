@@ -103,22 +103,64 @@ El agente puede usar este patron via un one-liner `python3 -c "..."` en un Shell
 
 ## Metricas de tarea (`.intermarkit/task-metrics/`)
 
-- `.intermarkit/task-metrics/{PROJ-XXX}.json` — fichero por tarea. Campos:
-  ```json
-  {
-    "issue_key": "PROJ-XXX",
-    "started_at": "2026-07-07T20:00:00Z",
-    "tool_calls": 42,
-    "finished_at": "2026-07-07T21:30:00Z",
-    "elapsed_minutes": 90.0,
-    "context_usage": null
-  }
-  ```
-  `tool_calls` lo mantiene el hook `postToolUse` en tiempo real. `finished_at`/`elapsed_minutes` los rellena el hook `stop` DESPUES del comentario Jira, asi que sirven solo como historico local.
+### `.intermarkit/task-metrics/{PROJ-XXX}.json`
 
-- `.intermarkit/task-metrics/.active` — pointer al fichero de la tarea activa (path relativo). Lo escribe el agente al iniciar (Fase A) y lo borra al cerrar (Fase C). Optimiza el hook `postToolUse` de O(n) a O(1).
+Fichero por tarea. Schema:
 
-- `.intermarkit/task-metrics/.hooks.log` — log de fallos de hooks (fail-open + rastro). Rotacion simple si supera 100 KB.
+```json
+{
+  "issue_key": "PROJ-XXX",
+  "started_at": "2026-07-07T20:00:00Z",
+  "tool_calls": 42,
+  "tokens": {
+    "input": 1947096,
+    "output": 10348,
+    "cache_read": 1506478,
+    "cache_write": 440604,
+    "turns": 3
+  },
+  "context_peak": {
+    "tokens": 120000,
+    "percent": 85,
+    "window_size": 128000,
+    "recorded_at": "2026-07-07T20:45:00Z",
+    "compactions": 2
+  },
+  "last_stop_status": "completed",
+  "last_model": "claude-sonnet-5",
+  "cursor_version": "3.10.17",
+  "finished_at": "2026-07-07T21:30:00Z",
+  "elapsed_ms": 5400000,
+  "elapsed_minutes": 90.0,
+  "session_end_reason": "user_close",
+  "final_status": "completed",
+  "session_id": "aa473efe-...",
+  "is_background_agent": false
+}
+```
+
+Fuentes de cada campo:
+
+| Campo | Origen | Semantica |
+|---|---|---|
+| `issue_key`, `started_at` | Agente (Fase A) | Al iniciar la tarea |
+| `tool_calls` | Hook `postToolUse` | Incremento por cada llamada a herramienta, en vivo |
+| `tokens.input/output/cache_read/cache_write` | Hook `stop` | Suma acumulada de todos los turnos observados. Campos reales del payload de Cursor (`input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens`, v3.10.17+) |
+| `tokens.turns` | Hook `stop` | Numero de turnos observados |
+| `context_peak` | Hook `preCompact` | Pico maximo de contexto durante la tarea. Solo aparece cuando Cursor decide compactar (auto o manual). `compactions` cuenta el total de compactaciones |
+| `last_stop_status`, `last_model`, `cursor_version` | Hook `stop` | Informativo, ultimo turno |
+| `finished_at`, `elapsed_ms`, `elapsed_minutes` | Hook `sessionEnd` | Se rellenan al cerrarse el chat (no antes). `elapsed_ms` viene directo del `duration_ms` del payload de Cursor, fiable |
+| `session_end_reason`, `final_status`, `session_id`, `is_background_agent` | Hook `sessionEnd` | Contexto del cierre |
+
+**IMPORTANTE:** los tokens del turno que ESCRIBE el comentario Jira todavia no estan en el fichero cuando se escribe (el hook `stop` de ese turno se dispara despues). El comentario refleja los tokens de los turnos previos; es una cota inferior aceptable.
+
+### `.intermarkit/task-metrics/.active`
+
+Pointer al fichero de la tarea activa (path relativo o absoluto). Lo escribe el agente al iniciar (Fase A) y lo borra al cerrar (Fase C `/im-close`). Optimiza los hooks a O(1). El hook `sessionEnd` NO borra este pointer — una tarea Jira puede sobrevivir al cierre de un chat y continuar en otra conversacion.
+
+### `.intermarkit/task-metrics/.hooks.log`
+
+Log de fallos de hooks (fail-open + rastro). Rotacion simple si supera 100 KB.
 
 ## Convenciones Git
 
@@ -172,9 +214,16 @@ Ejemplos:
 - **Verificacion:** OpenSpec verify + revision adversarial APROBADA
 - **Tiempo dedicado:** X min
 - **Tool calls:** N
+- **Tokens:** input 1.9M · output 10K · cache hit 77% · turns 3
+- **Context peak:** 120K tokens (85% del window)  ← opcional, solo si hay `context_peak`
 ```
 
-No incluir cifras de tokens/contexto (Cursor no las expone de forma fiable en el momento del cierre).
+Reglas de formato:
+
+- **Tokens:** usa el bloque `tokens` del fichero de metricas. Formatea con `M`/`K` para legibilidad (`1_947_096` -> `1.9M`, `10_348` -> `10K`). `cache hit %` = `cache_read / input * 100` redondeado a entero.
+- **Context peak:** solo incluir la linea si `context_peak` existe en el fichero (indica que hubo al menos una compactacion). Formato: `<tokens> (<percent>% del window)`.
+- **Tokens del turno actual:** no estan contabilizados (el hook `stop` se dispara despues del comentario). La cifra es una cota inferior aceptable — indicalo en el commit o en la documentacion si es relevante, pero no en el comentario Jira estandar.
+- **Nunca inventar cifras:** si el bloque `tokens` no existe o `tokens.turns` es 0, omite las lineas de tokens y context_peak.
 
 ## Flujo de estados Jira
 

@@ -30,8 +30,16 @@ Toma una tarea Jira y prepara el entorno (Fase A del workflow definido en `rules
    - Si no existe transicion, informa y continua.
 6. **Iniciar metricas**:
    - `mkdir -p .intermarkit/task-metrics`
-   - Escribe `.intermarkit/task-metrics/{ISSUE_KEY}.json` con `{"issue_key":"{ISSUE_KEY}","started_at":"<ISO 8601 UTC>","tool_calls":0}`.
-   - Escribe el pointer `.intermarkit/task-metrics/.active` con `{ISSUE_KEY}.json` (path relativo al directorio). Esto habilita el modo O(1) del hook `postToolUse`.
+   - Escribe `.intermarkit/task-metrics/{ISSUE_KEY}.json` con:
+     ```json
+     {
+       "issue_key": "{ISSUE_KEY}",
+       "started_at": "<ISO 8601 UTC>",
+       "tool_calls": 0,
+       "tokens": {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "turns": 0}
+     }
+     ```
+   - Escribe el pointer `.intermarkit/task-metrics/.active` con `{ISSUE_KEY}.json`. Esto habilita el modo O(1) de los hooks `postToolUse`, `stop`, `preCompact` y `sessionEnd`.
 7. **Confirmar al usuario** — rama creada, Jira en "In Progress", metricas iniciadas, criterios de aceptacion detectados (o "sin checklist").
 8. **Sugerir siguiente paso** — continuar con la Fase B (`/opsx-propose` para spec-driven, o analisis directo si el requisito es claro).
 

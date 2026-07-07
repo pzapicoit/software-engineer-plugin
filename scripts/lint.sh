@@ -60,7 +60,7 @@ done
 
 echo ""
 echo "== Shell hooks =="
-for f in hooks/session-context.sh hooks/task-metrics-tooluse.sh hooks/task-metrics-stop.sh; do
+for f in hooks/session-context.sh hooks/task-metrics-tooluse.sh hooks/task-metrics-stop.sh hooks/task-metrics-session-end.sh hooks/task-metrics-compact.sh; do
   if [ ! -f "$f" ]; then
     check "$f" 1 "no existe"
     continue
@@ -100,6 +100,8 @@ for path in \
   "hooks/session-context.sh" \
   "hooks/task-metrics-tooluse.sh" \
   "hooks/task-metrics-stop.sh" \
+  "hooks/task-metrics-session-end.sh" \
+  "hooks/task-metrics-compact.sh" \
   "hooks.json" \
   "mcp.json" \
   "config-template.yaml" \
