@@ -28,7 +28,7 @@ check() {
 }
 
 echo "== JSON =="
-for f in hooks.json mcp.json .cursor-plugin/plugin.json; do
+for f in hooks/hooks.json mcp.json .cursor-plugin/plugin.json; do
   if [ ! -f "$f" ]; then
     check "$f" 1 "no existe"
     continue
@@ -39,6 +39,36 @@ for f in hooks.json mcp.json .cursor-plugin/plugin.json; do
     check "$f" 1 "JSON invalido"
   fi
 done
+
+echo ""
+echo "== Rutas de comandos en hooks/hooks.json =="
+if [ -f "hooks/hooks.json" ]; then
+  # Los "command" de hooks/hooks.json se resuelven relativos a la raiz del
+  # plugin (no relativos a hooks/hooks.json). Ver docs oficiales:
+  # https://cursor.com/docs/reference/plugins.md#hooks-format
+  while IFS= read -r cmd_path; do
+    [ -z "$cmd_path" ] && continue
+    if [ -f "$cmd_path" ]; then
+      if [ -x "$cmd_path" ]; then
+        check "hooks/hooks.json -> $cmd_path" 0
+      else
+        check "hooks/hooks.json -> $cmd_path" 1 "no ejecutable (chmod +x)"
+      fi
+    else
+      check "hooks/hooks.json -> $cmd_path" 1 "no existe relativo a la raiz del plugin"
+    fi
+  done < <(python3 -c "
+import json
+data = json.load(open('hooks/hooks.json'))
+for entries in data.get('hooks', {}).values():
+    for entry in entries:
+        cmd = entry.get('command', '')
+        if cmd:
+            print(cmd)
+" 2>/dev/null)
+else
+  check "hooks/hooks.json" 1 "no existe, no se pueden validar rutas de comandos"
+fi
 
 echo ""
 echo "== Version en description =="
@@ -125,7 +155,7 @@ for path in \
   "hooks/task-metrics-stop.sh" \
   "hooks/task-metrics-session-end.sh" \
   "hooks/task-metrics-compact.sh" \
-  "hooks.json" \
+  "hooks/hooks.json" \
   "mcp.json" \
   "config-template.yaml" \
   "README.md" \

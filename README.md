@@ -138,6 +138,7 @@ software-engineer-plugin/
 │   ├── im-close.md
 │   └── im-status.md
 ├── hooks/
+│   ├── hooks.json                  # config de hooks (ubicacion requerida por Cursor)
 │   ├── session-context.sh          # pre-checks + JSON payload (sessionStart)
 │   ├── task-metrics-tooluse.sh     # incrementa tool_calls (postToolUse, O(1) + flock)
 │   ├── task-metrics-stop.sh        # acumula tokens por turno (stop)
@@ -145,7 +146,6 @@ software-engineer-plugin/
 │   └── task-metrics-compact.sh     # registra context_peak (preCompact)
 ├── scripts/
 │   └── lint.sh                 # smoke checks del plugin
-├── hooks.json
 ├── mcp.json
 ├── config-template.yaml
 ├── CHANGELOG.md
@@ -189,7 +189,7 @@ Smoke checks locales:
 bash scripts/lint.sh
 ```
 
-Valida JSON (`hooks.json`, `mcp.json`, `plugin.json`), YAML (`config-template.yaml`) y sintaxis shell de los hooks (si `shellcheck` esta instalado).
+Valida JSON (`hooks/hooks.json`, `mcp.json`, `plugin.json`), YAML (`config-template.yaml`), sintaxis shell de los hooks (si `shellcheck` esta instalado) y que las rutas `command` declaradas en `hooks/hooks.json` existan y sean ejecutables.
 
 ## Licencia
 

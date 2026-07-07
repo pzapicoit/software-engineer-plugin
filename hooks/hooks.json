@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      { "command": "hooks/session-context.sh" }
+    ],
+    "postToolUse": [
+      { "command": "hooks/task-metrics-tooluse.sh" }
+    ],
+    "stop": [
+      { "command": "hooks/task-metrics-stop.sh" }
+    ],
+    "sessionEnd": [
+      { "command": "hooks/task-metrics-session-end.sh" }
+    ],
+    "preCompact": [
+      { "command": "hooks/task-metrics-compact.sh" }
+    ]
+  }
+}

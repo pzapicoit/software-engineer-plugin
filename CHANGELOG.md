@@ -2,6 +2,18 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). Versiones semanticas.
 
+## [0.3.2] — 2026-07-08
+
+### Fixed
+
+- **Bug critico: los 5 hooks no se registraban en absoluto.** El fichero de configuracion vivia en `hooks.json` (raiz del plugin), pero segun la [referencia oficial de plugins de Cursor](https://cursor.com/docs/reference/plugins.md#component-discovery), la ubicacion de descubrimiento automatico es `hooks/hooks.json`. Al no existir ahi, Cursor registraba 0 hooks silenciosamente (sin error visible), aunque el resto de componentes (`commands/`, `skills/`, `rules/`) se cargaban con normalidad. Movido `hooks.json` -> `hooks/hooks.json`.
+- **Rutas de `command` incorrectas** — usaban el prefijo `.cursor/hooks/...` (convencion de hooks a nivel de *proyecto* de usuario), cuando las rutas dentro de un `hooks.json` de *plugin* se resuelven relativas a la raiz del plugin. Corregido a `hooks/session-context.sh`, `hooks/task-metrics-tooluse.sh`, etc.
+- **`scripts/lint.sh`** — nuevo check que parsea `hooks/hooks.json` y valida que cada `command` exista como fichero ejecutable relativo a la raiz del plugin, para detectar esta clase de bug antes de publicar.
+
+### Changed
+
+- **`.cursor-plugin/plugin.json`** — bump a `0.3.2`. La `description` ahora empieza siempre con `v<version> - ` para poder verificar de un vistazo en Customize > Plugins que version esta realmente cargada. `scripts/lint.sh` valida que el prefijo coincida con `version`.
+
 ## [0.3.1] — 2026-07-07
 
 ### Added
