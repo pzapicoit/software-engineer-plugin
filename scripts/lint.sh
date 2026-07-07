@@ -41,6 +41,29 @@ for f in hooks.json mcp.json .cursor-plugin/plugin.json; do
 done
 
 echo ""
+echo "== Version en description =="
+if [ -f ".cursor-plugin/plugin.json" ]; then
+  version_check_result="$(python3 -c "
+import json, sys
+try:
+    data = json.load(open('.cursor-plugin/plugin.json'))
+    version = data.get('version', '')
+    description = data.get('description', '')
+    expected_prefix = f'v{version} - '
+    sys.exit(0 if description.startswith(expected_prefix) else 1)
+except Exception:
+    sys.exit(1)
+" 2>/dev/null; echo $?)"
+  if [ "$version_check_result" -eq 0 ]; then
+    check "description empieza con 'v<version> - '" 0
+  else
+    check "description empieza con 'v<version> - '" 1 "actualiza description en .cursor-plugin/plugin.json al bump de version"
+  fi
+else
+  check "description empieza con 'v<version> - '" 1 ".cursor-plugin/plugin.json no existe"
+fi
+
+echo ""
 echo "== YAML =="
 for f in config-template.yaml; do
   if [ ! -f "$f" ]; then
