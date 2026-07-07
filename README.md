@@ -1,127 +1,104 @@
 # IntermarkIt Dev Plugin
 
-Plugin de Cursor para desarrolladores de IntermarkIt. Integra normas de trabajo siempre activas (sin invocacion) con workflow spec-driven (OpenSpec), gestion de tareas via Jira, Git/Bitbucket (MCP Atlassian incluido) y modelo fijado a Claude Sonnet 5.
+Plugin de Cursor para desarrolladores de IntermarkIt. Integra normas de trabajo siempre activas con workflow spec-driven (OpenSpec), gestion de tareas via Jira, Git/Bitbucket (MCP Atlassian incluido), cache MCP local para ahorrar peticiones y modelo fijado a `claude-sonnet-5`.
 
 ## Que incluye
 
-- **Regla `intermarkit-global`** (`alwaysApply: true`) — normas de trabajo activas en TODA conversacion sin invocar nada: ambito de proyecto, cascada de configuracion, Git/Bitbucket, arquitectura y skills/subagentes obligatorios
-- **Regla `openspec-workflow`** (`alwaysApply: true`) — refuerza el workflow spec-driven completo (propose -> review -> apply -> verify -> revision adversarial -> archive)
-- **Agente `software-engineer`** — fijado a `model: claude-sonnet-5` (nunca usa Opus), invocable explicitamente con `/software-engineer`
-- **Subagente `adversarial-reviewer`** — revision esceptica y readonly tras cada implementacion, antes de archivar
-- **Skill `architect`** — revisa el codigo existente (o ayuda a definir el stack si el proyecto esta vacio) y documenta arquitectura y funcionalidad antes de implementar nada
-- **Skill `python-development`** — aplica buenas practicas, tooling (uv, ruff, mypy, pytest) y frameworks estandar (FastAPI, Django, Typer, SQLAlchemy) al escribir o revisar codigo Python
-- **MCP Atlassian** (`mcp.json`) — servidor remoto oficial `https://mcp.atlassian.com/v1/mcp/authv2`, se instala junto al plugin. Cubre Jira, Confluence y **Bitbucket Cloud** (PRs, branches, pipelines, repos)
-- **Hook `sessionStart`** — inyecta automaticamente el contexto del proyecto (Jira, repo, rama actual) al inicio de cada sesion para ahorrar tokens
-- **Hook `postToolUse`** — incrementa en vivo el contador de tool calls en las metricas de la tarea activa
-- **Hook `stop`** — registro historico local (timestamp de fin, duracion, context usage si Cursor lo expone) en las metricas de la tarea activa; no alimenta el comentario Jira del mismo turno (ver seccion Hooks)
+- **Regla `intermarkit-global`** (`alwaysApply: true`) — fuente unica de verdad: cascada de setup, workflow OpenSpec, convenciones Git, cache MCP y comandos. Se carga en TODA conversacion sin invocar nada.
+- **Agente `software-engineer`** — fijado a `claude-sonnet-5`, sigue la regla global (no la duplica). Invocable con `/software-engineer` cuando se prefiera contexto aislado.
+- **Subagente `adversarial-reviewer`** — revision esceptica y readonly tras cada implementacion, antes de archivar.
+- **Skill `architect`** — documenta arquitectura y funcionalidad antes de implementar (brownfield o greenfield).
+- **Skill `python-development`** — buenas practicas Python (uv, ruff, mypy, pytest) y frameworks estandar (FastAPI, Django, Typer, SQLAlchemy).
+- **Comandos propios**:
+  - `/im-take {ISSUE_KEY}` — Fase A (rama + Jira "In Progress" + metricas + cache de transiciones).
+  - `/im-close` — Fase C (push + PR + criterios + Jira "In Testing" + comentario con metricas + limpieza).
+  - `/im-status` — resumen del estado (tarea activa, tiempo, tool calls, estado de la cache MCP). Readonly.
+- **MCP Atlassian** (`mcp.json`) — servidor oficial `https://mcp.atlassian.com/v1/mcp/authv2`. Cubre Jira, Confluence y **Bitbucket Cloud** (PRs, branches, pipelines, repos).
+- **Hook `sessionStart`** — inyecta contexto de proyecto + pre-checks (credentials, docs, openspec, tarea activa, estado cache MCP) al inicio de cada sesion. Evita 4-6 tool calls repetitivos.
+- **Hook `postToolUse`** — incrementa `tool_calls` en la tarea activa. O(1) via pointer `.active`, con lock (`fcntl.flock`) para tool calls concurrentes.
+- **Hook `stop`** — cierre local: `finished_at`, `elapsed_minutes`, `context_usage` si Cursor lo expone. Registro historico, no alimenta el comentario Jira del mismo turno.
+- **Cache MCP local (`.intermarkit/cache/`)** — respuestas estables cacheadas con TTL: `atlassian-user.json` (30d), `jira-transitions-{PROJECT}.json` (7d), `bitbucket-verified.json` (24h). El agente lee la cache antes de llamar al MCP y la actualiza tras cada llamada exitosa.
 
 ## Como se activa
 
-Las dos reglas (`intermarkit-global` y `openspec-workflow`) se cargan automaticamente en **cada conversacion** de cualquier desarrollador que tenga el plugin instalado — no hace falta escribir `/software-engineer` ni ningun comando. El agente y el subagente siguen disponibles para invocacion explicita cuando se prefiera un contexto aislado.
+La regla `intermarkit-global` (`alwaysApply: true`) se carga automaticamente en **cada conversacion**. No hace falta escribir `/software-engineer` ni ningun comando. El agente y el subagente estan disponibles para invocacion explicita cuando se prefiera contexto aislado.
 
 ## Primera vez
 
-Las reglas guian el setup automaticamente, sin invocacion:
+La regla guia el setup automaticamente:
 
-1. **Autentica MCP Atlassian** — si pide login OAuth, te guia para completarlo
-2. **Crea config global** (`~/.intermarkit/credentials.yaml`) — si no existe
-3. **Crea config de proyecto** (`.intermarkit/config.yaml`) — te pide la clave del proyecto Jira, URL del repo, tipo (bitbucket/github/gitlab) y workspace
-4. **Verifica OpenSpec** — si no esta inicializado, ofrece ejecutar `openspec init`
-5. **Verifica Bitbucket** — comprueba que las herramientas MCP Bitbucket responden (requiere que un admin habilite API token auth, ver seccion siguiente)
-6. **Documenta arquitectura** (skill `architect`) — si hay codigo, lo revisa y genera `.intermarkit/architecture.md` y `.intermarkit/functional.md`; si el proyecto esta vacio, te ayuda a decidir el stack y lo documenta
+1. **Autentica MCP Atlassian** — si pide login OAuth, te guia para completarlo.
+2. **Crea config global** (`~/.intermarkit/credentials.yaml`) — si no existe.
+3. **Crea config de proyecto** (`.intermarkit/config.yaml`) — te pide clave Jira, URL repo, tipo, workspace.
+4. **Verifica OpenSpec** — si no esta inicializado, ofrece `openspec init --tools cursor`.
+5. **Verifica Bitbucket** — comprueba `bitbucketWorkspace` (requiere que un admin habilite API token auth).
+6. **Documenta arquitectura** (skill `architect`) — genera `.intermarkit/architecture.md` y `.intermarkit/functional.md`.
 
-No necesitas crear ficheros manualmente. El agente te pregunta y los genera.
+No necesitas crear ficheros manualmente. El agente los genera. **Todo lo que ya esta OK, el hook `sessionStart` lo detecta y el agente lo salta**, evitando comprobaciones redundantes.
 
 ## Prerequisitos
 
-1. **OpenSpec CLI** instalado:
-
-```bash
-npm install -g @fission-ai/openspec@latest
-```
-
+1. **OpenSpec CLI**:
+   ```bash
+   npm install -g @fission-ai/openspec@latest
+   ```
 2. **Bitbucket Cloud** (para operaciones remotas: PRs, pipelines, branches via MCP):
-   - El workspace de Bitbucket debe estar vinculado a la organizacion Atlassian
-   - Un admin debe habilitar **API token authentication** en: `Admin Hub > Rovo > Rovo MCP`
-   - Las operaciones Git locales (checkout, commit, push) funcionan sin este paso
+   - El workspace de Bitbucket debe estar vinculado a la organizacion Atlassian.
+   - Un admin debe habilitar **API token authentication** en: `Admin Hub > Rovo > Rovo MCP`.
+   - Las operaciones Git locales (checkout, commit, push) funcionan sin este paso.
 
 ## Uso
 
 Al ser normas siempre activas, puedes preguntar directamente sin invocar nada:
 
-### Consultar tareas asignadas
+### Consultar tareas
 
 ```
 que tareas tengo?
 ```
 
-### Trabajar en una tarea
+### Trabajar en una tarea (workflow completo)
 
 ```
 trabaja en PROJ-42
 ```
 
-Si prefieres forzar el contexto aislado del agente explicito, tambien funciona:
+O usa los comandos propios:
 
 ```
-/software-engineer trabaja en PROJ-42
+/im-take PROJ-42     # Fase A: prepara entorno
+                     # ...implementas con /opsx-* + adversarial-reviewer...
+/im-close            # Fase C: cierra tarea
 ```
 
-### Git y Bitbucket
+Comprobar estado en cualquier momento (readonly):
 
 ```
-crea rama para PROJ-42
+/im-status
 ```
 
-El agente crea automaticamente `feature/PROJ-42-slug` desde la rama principal configurada.
+### Workflow (Fase A + B + C)
 
-```
-crea un PR para PROJ-42
-```
+Detallado en la regla `rules/intermarkit-global.mdc` §6.3 y en `agents/software-engineer.md` Paso 3.
 
-Usa las herramientas MCP de Bitbucket para crear el PR, enlazarlo a Jira y verificar pipelines.
+**Fase A — Preparar entorno:** rama + Jira "In Progress" + metricas + pointer `.active`.
 
-### Workflow completo (Git + OpenSpec + Jira)
+**Fase B — Ciclo OpenSpec:** `/opsx-propose` -> revision con usuario -> `/opsx-apply` -> `/opsx-verify` -> `adversarial-reviewer` -> `/opsx-archive`. La revision adversarial es obligatoria salvo cambios triviales.
 
-Al trabajar en una tarea, el agente ejecuta el ciclo completo de forma integrada:
+**Fase C — Cierre:** commit final + push + PR + marcar criterios Jira + Jira "In Testing" + calcular metricas + comentario Jira + borrar pointer `.active`. Tras cierre, sugerir chat nuevo para la siguiente tarea (una tarea Jira por conversacion).
 
-**Fase A — Preparar entorno:**
-1. Crea rama (`feature/PROJ-XXX-slug`) desde la rama principal
-2. Transiciona el issue Jira a **In Progress**
-3. Inicia metricas de tarea (timestamp + contador de tool calls)
+**Flujo de estados Jira:** `To Do -> In Progress -> In Testing -> Done`.
 
-**Fase B — Ciclo OpenSpec:**
-4. `/opsx-propose`: genera proposal, specs, design, tasks
-5. Presenta la propuesta y espera tu aprobacion (o ajustes)
-6. `/opsx-apply`: implementa con commits parciales
-7. `/opsx-verify`: valida contra artefactos
-8. `adversarial-reviewer`: revision esceptica obligatoria
-9. Si hallazgos criticos, corrige y repite verify + adversarial
-10. `/opsx-archive`: solo cuando el veredicto es `APROBADO`
+## Ahorro de peticiones
 
-**Fase C — Cierre (Git + Jira):**
-11. Actualiza docs de arquitectura si el cambio lo requiere
-12. Commit final + `git push -u origin HEAD`
-13. Crea PR via MCP Bitbucket (o informa para crearlo manualmente)
-14. Marca en la descripcion del issue los criterios de aceptacion (`- [ ]`) que quedaron realmente cumplidos, como `- [x]`
-15. Transiciona el issue Jira a **In Testing**
-16. Calcula tiempo dedicado (por timestamp) y lee tool calls (contador en vivo)
-17. Anade comentario resumen al issue (rama, PR, cambios, criterios marcados, verificacion, tiempo, tool calls)
-18. Si quieres trabajar en otra tarea, el agente te pedira abrir un chat nuevo (ver seccion siguiente)
+Diseno explicito para reducir tokens y llamadas MCP:
 
-**Flujo de estados Jira:** `To Do -> In Progress -> In Testing -> Done`
+- **Regla global unica** — el agente NO duplica la cascada; delega en la regla `intermarkit-global.mdc`. Reduccion ~40% de contexto en el agente respecto a v0.2.
+- **Hook `sessionStart` con pre-checks** — devuelve `config_exists`, `credentials_global_exists`, `architecture_docs_exists`, `openspec_initialized`, `active_task` y estado de la cache MCP. El agente evita 4-6 tool calls al inicio de cada chat.
+- **Cache MCP local** — `atlassianUserInfo` (30d), transiciones Jira por proyecto (7d), verificacion Bitbucket (24h). Ahorra 3-5 llamadas MCP por tarea Jira completa.
+- **Pointer `.active`** — el hook `postToolUse` pasa de O(n) (escaneando todos los JSON) a O(1) (leyendo un solo pointer).
 
-### Una tarea Jira por conversacion
-
-Cuando una tarea se cierra, el agente **no** continua con otra tarea Jira en el mismo chat. Te pedira abrir una conversacion nueva para evitar arrastrar contexto de la tarea ya cerrada (propuesta, codigo revisado, discusiones), que solo consumiria tokens sin aportar valor a la siguiente tarea.
-
-Si solo necesitas algo puntual sobre la tarea recien cerrada (revisar el PR, una duda, ajustar el comentario), puedes seguir en el mismo chat sin problema.
-
-**Nota:** `/opsx-verify` requiere el perfil expandido de OpenSpec. Si tu proyecto solo tiene el perfil `core`, el agente te ofrecera habilitarlo con:
-```bash
-openspec config profile
-openspec update
-```
+Detalles del schema de cache y ejemplos: [`agents/reference.md`](agents/reference.md#cache-mcp-schema).
 
 ## Estructura
 
@@ -131,7 +108,8 @@ software-engineer-plugin/
 │   └── plugin.json
 ├── agents/
 │   ├── software-engineer.md
-│   └── adversarial-reviewer.md
+│   ├── adversarial-reviewer.md
+│   └── reference.md            # bloques compartidos (MCP Bitbucket, cache schema, Git conventions)
 ├── skills/
 │   ├── architect/
 │   │   └── SKILL.md
@@ -139,57 +117,51 @@ software-engineer-plugin/
 │       ├── SKILL.md
 │       └── reference.md
 ├── rules/
-│   ├── intermarkit-global.mdc
-│   └── openspec-workflow.mdc
+│   └── intermarkit-global.mdc  # fuente unica de verdad
+├── commands/
+│   ├── im-take.md
+│   ├── im-close.md
+│   └── im-status.md
 ├── hooks/
-│   ├── session-context.sh
-│   ├── task-metrics-tooluse.sh
-│   └── task-metrics-stop.sh
+│   ├── session-context.sh      # pre-checks + JSON payload
+│   ├── task-metrics-tooluse.sh # O(1) + flock
+│   └── task-metrics-stop.sh    # cierre + limpieza .active
+├── scripts/
+│   └── lint.sh                 # smoke checks del plugin
 ├── hooks.json
 ├── mcp.json
 ├── config-template.yaml
+├── CHANGELOG.md
+├── .gitignore
 └── README.md
 ```
 
-## Ficheros generados en cada proyecto
+## Ficheros generados en cada proyecto consumidor
 
-- `.intermarkit/config.yaml` — configuracion del proyecto (Jira, repo, docs)
-- `.intermarkit/architecture.md` — stack tecnico y arquitectura (generado por la skill `architect`)
-- `.intermarkit/functional.md` — documentacion funcional del sistema (generado por la skill `architect`)
-- `.intermarkit/task-metrics/{PROJ-XXX}.json` — metricas por tarea (`started_at`, `tool_calls` en vivo; `finished_at`/`elapsed_minutes`/`context_usage` los anade el hook `stop` como registro historico, despues de que el comentario Jira ya se haya escrito). Datos locales de sesion, no se commitean al repo.
+- `.intermarkit/config.yaml` — configuracion (commiteable, define el proyecto).
+- `.intermarkit/architecture.md` — stack + arquitectura (commiteable, generado por la skill `architect`).
+- `.intermarkit/functional.md` — documentacion funcional (commiteable, generado por la skill `architect`).
+- `.intermarkit/task-metrics/*.json` — metricas por tarea (local, NO commitear).
+- `.intermarkit/task-metrics/.active` — pointer a tarea activa (local, NO commitear).
+- `.intermarkit/task-metrics/.hooks.log` — log de errores de hooks (local, NO commitear).
+- `.intermarkit/cache/*.json` — cache MCP local (local, NO commitear).
 
-## Convenciones Git
+`.gitignore` recomendado para el proyecto consumidor:
 
-El plugin impone automaticamente:
+```
+.intermarkit/task-metrics/
+.intermarkit/cache/
+```
 
-- **Ramas**: `feature/PROJ-XXX-slug`, `bugfix/PROJ-XXX-slug`, `hotfix/PROJ-XXX-slug`
-- **Commits**: formato convencional `tipo(PROJ-XXX): descripcion`
-- **PRs**: creados via MCP Bitbucket con titulo del commit principal y descripcion de la propuesta OpenSpec
+## Desarrollo del plugin
 
-## Hooks
+Smoke checks locales:
 
-### `sessionStart` — Contexto de sesion
+```bash
+bash scripts/lint.sh
+```
 
-Al iniciar cada sesion, un hook lee `.intermarkit/config.yaml` y la rama Git actual, e inyecta un resumen compacto como contexto del agente. Esto evita que el agente gaste tokens leyendo ficheros de configuracion repetidamente.
-
-Si el fichero de config no existe, el hook informa al agente para que inicie el flujo de setup guiado.
-
-### `postToolUse` — Contador de tool calls
-
-Cada vez que el agente usa una herramienta, este hook incrementa el campo `tool_calls` en el fichero de metricas de la tarea activa (`.intermarkit/task-metrics/{PROJ-XXX}.json`). Si no hay tarea activa, el hook no hace nada (fail-open).
-
-### `stop` — Registro historico de metricas
-
-Cuando el agente termina de responder, este hook escribe en el fichero de metricas:
-- `finished_at`: timestamp de fin
-- `elapsed_minutes`: duracion calculada
-- `context_usage`: datos de uso de contexto/tokens si Cursor los expone en el JSON del evento (puede quedar vacio si no los expone)
-
-**Importante:** este hook se dispara DESPUES de que el agente termine de responder, es decir, despues de que el comentario de cierre ya se haya escrito en Jira. Por eso el comentario Jira nunca incluye estos campos — el agente calcula el tiempo dedicado el mismo (comparando `started_at` con la hora actual, via Shell) y usa `tool_calls` (que si esta disponible en vivo) como metrica de actividad. El registro de este hook queda solo como historico local en `.intermarkit/task-metrics/`.
-
-### Sobre las metricas en el comentario Jira
-
-El comentario de cierre incluye **tiempo dedicado** (calculado por timestamp) y **tool calls** (contador exacto), pero no cifras de tokens/contexto: Cursor no las expone de forma fiable a mitad de conversacion. Para ver el consumo de contexto de una conversacion, usa el panel "View Report" de Cursor.
+Valida JSON (`hooks.json`, `mcp.json`, `plugin.json`), YAML (`config-template.yaml`) y sintaxis shell de los hooks (si `shellcheck` esta instalado).
 
 ## Licencia
 

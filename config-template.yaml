@@ -1,7 +1,12 @@
 # .intermarkit/config.yaml
-# Configuracion del proyecto para el plugin IntermarkIt
+# Configuracion del proyecto para el plugin IntermarkIt.
 # Copia este fichero a .intermarkit/config.yaml en la raiz de tu proyecto
 # y completa los valores.
+#
+# El plugin generara adicionalmente (no commitear, ver .gitignore recomendado en el README):
+#   - .intermarkit/task-metrics/  → metricas por tarea (tool_calls, tiempos)
+#   - .intermarkit/cache/         → cache local de respuestas MCP (Atlassian, Bitbucket)
+#   - .intermarkit/architecture.md, functional.md → documentacion generada por la skill architect (esta si va al repo)
 
 jira:
   site: https://intermarkit.atlassian.net
