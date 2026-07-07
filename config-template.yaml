@@ -1,0 +1,18 @@
+# .intermarkit/config.yaml
+# Configuracion del proyecto para el plugin IntermarkIt
+# Copia este fichero a .intermarkit/config.yaml en la raiz de tu proyecto
+# y completa los valores.
+
+jira:
+  site: https://intermarkit.atlassian.net
+  project: PROJ  # Clave del proyecto Jira (ej: PROJ, DEV, WEB)
+
+repo:
+  type: bitbucket             # bitbucket | github | gitlab
+  url: https://bitbucket.org/intermarkithub/nombre-repo
+  workspace: intermarkithub   # workspace slug de Bitbucket (solo para bitbucket)
+  default_branch: main        # rama principal del repositorio
+
+docs:
+  confluence_space: ""  # Opcional: clave del espacio Confluence (ej: DEV)
+  url: ""               # Opcional: URL de documentacion externa

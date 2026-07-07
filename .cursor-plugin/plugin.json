@@ -1,0 +1,10 @@
+{
+  "name": "intermarkit-dev",
+  "version": "0.2.0",
+  "description": "Plugin de desarrollo IntermarkIt: agente de software engineer con workflow OpenSpec y Jira",
+  "author": {
+    "name": "IntermarkIt"
+  },
+  "license": "MIT",
+  "keywords": ["intermarkit", "openspec", "jira", "software-engineer", "spec-driven"]
+}

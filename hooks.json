@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "command": ".cursor/hooks/session-context.sh"
+      }
+    ],
+    "postToolUse": [
+      {
+        "command": ".cursor/hooks/task-metrics-tooluse.sh"
+      }
+    ],
+    "stop": [
+      {
+        "command": ".cursor/hooks/task-metrics-stop.sh"
+      }
+    ]
+  }
+}

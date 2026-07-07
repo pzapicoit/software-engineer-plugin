@@ -1,0 +1,167 @@
+---
+description: Normas de trabajo globales IntermarkIt (contexto de proyecto, Jira, arquitectura y OpenSpec) activas en toda conversacion, sin necesidad de invocar ningun agente
+alwaysApply: true
+---
+
+# Normas de trabajo IntermarkIt
+
+Estas normas se aplican SIEMPRE, en cualquier conversacion de este proyecto, sin que el usuario tenga que invocar ningun agente ni skill explicitamente.
+
+## 0. Al abrir un chat nuevo: anunciar el proyecto
+
+En el **primer mensaje de cada conversacion nueva**, antes (o junto con) tu respuesta a lo que pida el usuario, anuncia en que proyecto se esta trabajando:
+
+1. Lee `.intermarkit/config.yaml` (o usa el contexto inyectado por el hook `sessionStart` si ya esta disponible).
+2. Si existe, muestra una linea breve al principio de tu respuesta, por ejemplo:
+   ```
+   Proyecto: <jira.project> · Repo: <repo.type>/<repo.workspace>/<repo_name> · Rama: <rama actual>
+   ```
+   Incluye `docs.confluence_space` si esta definido.
+3. Si NO existe, indica claramente "Este proyecto no tiene configuracion IntermarkIt" y sigue el flujo de la seccion 2.3 para crearla antes de continuar con cualquier otra cosa.
+
+No repitas este anuncio en cada mensaje de la misma conversacion — solo al principio (primer mensaje del chat).
+
+### 0.1 Una tarea Jira por conversacion
+
+Cuando una tarea Jira se cierra (Fase C del workflow completada: PR creado, Jira en "In Testing", comentario con metricas anadido), si el usuario quiere trabajar en OTRA tarea Jira distinta, pide explicitamente que abra una conversacion nueva en vez de continuar en esta. El contexto acumulado (propuesta, codigo revisado, discusiones de la tarea cerrada) no aporta valor a la tarea siguiente y solo consume tokens y contexto innecesariamente.
+
+No aplica si el usuario pide algo puntual sobre la MISMA tarea ya cerrada (revisar el PR, responder una duda, ajustar el comentario): eso continua en el mismo chat.
+
+## 1. Ambito: solo el proyecto configurado
+
+- Todo el trabajo (dudas, preguntas, consultas de codigo, Jira, documentacion) se responde **exclusivamente en el contexto del proyecto configurado** en `.intermarkit/config.yaml`.
+- **Toda consulta a Jira (JQL o issue lookup) DEBE acotarse al proyecto configurado** (`project = "{jira.project}"`). Nunca se consulta o menciona informacion de otros proyectos Jira, aunque el usuario los nombre por error o ambiguedad — en ese caso, avisa y pide confirmacion.
+- Si no existe `.intermarkit/config.yaml`, no se responde nada relacionado con Jira, repo o documentacion externa hasta completar el Paso 2 (configuracion).
+
+## 2. Comprobacion de entorno (cascada obligatoria)
+
+Antes de responder cualquier peticion que implique trabajo real (no aplica a saludos o preguntas triviales), verifica en orden:
+
+### 2.1 MCP Atlassian
+El servidor MCP `atlassian` viene incluido en el plugin (`mcp.json`). Si `atlassianUserInfo` falla o pide autenticacion OAuth, guia al usuario para completar el login en https://intermarkit.atlassian.net. No continues con nada relacionado con Jira hasta que responda correctamente.
+
+### 2.2 Configuracion global (`~/.intermarkit/credentials.yaml`)
+Si no existe, creala con:
+```yaml
+atlassian:
+  managed_by: mcp
+```
+
+### 2.3 Configuracion de proyecto (`.intermarkit/config.yaml`)
+Si no existe, pregunta al usuario la clave del proyecto Jira (obligatorio), la URL del repositorio (obligatorio), tipo de repo y workspace, y crea el fichero:
+```yaml
+jira:
+  site: https://intermarkit.atlassian.net
+  project: <valor proporcionado>
+repo:
+  type: bitbucket             # bitbucket | github | gitlab
+  url: <valor proporcionado>
+  workspace: <workspace slug> # obligatorio para bitbucket
+  default_branch: main
+docs:
+  confluence_space: <opcional>
+  url: ""
+```
+No hay excepcion: sin este fichero, no se hace ningun trabajo que dependa de Jira o del repo.
+
+### 2.4 Documentacion de arquitectura y funcional
+Si `.intermarkit/architecture.md` o `.intermarkit/functional.md` no existen, aplica la skill `architect` ANTES de implementar nada:
+- Con codigo existente (brownfield): la skill revisa el codigo primero y documenta lo que realmente hace.
+- Sin codigo (greenfield): la skill ayuda a decidir el stack junto al usuario y lo documenta.
+
+### 2.5 OpenSpec
+Si no existe el directorio `openspec/`, ofrece inicializarlo con `openspec init --tools cursor`. Si `/opsx-verify` no esta disponible (perfil `core`), sugiere el perfil expandido (`openspec config profile` + `openspec update`).
+
+### 2.6 Bitbucket (si `repo.type` es `bitbucket`)
+Intenta ejecutar `bitbucketWorkspace` (list) via MCP Atlassian para verificar que la autenticacion Bitbucket funciona. Si falla o devuelve error de permisos:
+- Informa al usuario: "Las herramientas de Bitbucket requieren que un admin habilite API token authentication en **Admin Hub > Rovo > Rovo MCP**".
+- Las operaciones locales de Git (checkout, commit, push) siguen funcionando sin esta verificacion.
+- Las operaciones remotas (crear PR, ver pipelines, crear ramas remotas via MCP) no estaran disponibles hasta que se habilite.
+
+## 3. Skills y subagentes que se deben usar
+
+- **Skill `architect`** — obligatoria antes de cualquier implementacion si falta documentacion de arquitectura/funcional (ver 2.4).
+- **Subagente `adversarial-reviewer`** — obligatorio tras `/opsx-apply` + `/opsx-verify`, antes de `/opsx-archive`, salvo cambios triviales (typos, formatting, docs, dependencias menores).
+- **Workflow OpenSpec completo** — ver regla `openspec-workflow.mdc` para el detalle de fases (propose, revision, apply, verify, revision adversarial, archive).
+
+## 4. Modelo
+
+Las fases de implementacion y revision adversarial deben ejecutarse con el modelo fijado en los subagentes del plugin (`claude-sonnet-5`). Nunca sugerir ni forzar el uso de modelos de la familia Opus para estas fases.
+
+## 5. Consultas de tareas asignadas
+
+Cuando el usuario pregunte "que tareas tengo?" o similar, usa `atlassianUserInfo` + `searchJiraIssuesUsingJql` con `project = "{jira.project}" AND assignee = currentUser() AND status != Done`, siempre acotado al proyecto del config. Nunca devuelvas tareas de otros proyectos.
+
+## 6. Git y Bitbucket
+
+### 6.1 Convencion de ramas
+Al tomar una tarea Jira, crea la rama local siguiendo este patron:
+- Features: `feature/{PROJ-XXX}-{slug-corto}`
+- Bugfixes: `bugfix/{PROJ-XXX}-{slug-corto}`
+- Hotfixes: `hotfix/{PROJ-XXX}-{slug-corto}`
+
+Donde `{slug-corto}` son 2-4 palabras del titulo en kebab-case. Ejemplo: `feature/PROJ-42-auth-login`.
+
+### 6.2 Commits convencionales
+Formato: `tipo(PROJ-XXX): descripcion breve`
+- `feat(PROJ-42): add JWT authentication`
+- `fix(PROJ-42): handle expired token edge case`
+- `refactor(PROJ-42): extract token validation to service`
+
+### 6.3 Workflow completo al trabajar en una tarea
+
+**Fase A — Preparar entorno:**
+1. `git checkout {config.repo.default_branch}` y `git pull`
+2. `git checkout -b feature/PROJ-XXX-slug` (via Shell)
+3. Transicionar Jira a "In Progress": `getTransitionsForJiraIssue` para obtener el ID, luego `transitionJiraIssue`
+4. Iniciar metricas: crear `.intermarkit/task-metrics/{PROJ-XXX}.json` con timestamp de inicio y `tool_calls: 0`
+
+**Fase B — Implementar (ciclo OpenSpec):**
+5. `/opsx-propose`: generar proposal, specs, design, tasks
+6. Revision de la propuesta con el usuario (aprobacion obligatoria antes de implementar)
+7. `/opsx-apply`: implementar + commits parciales con formato convencional
+8. `/opsx-verify`: validar implementacion contra artefactos
+9. `adversarial-reviewer`: lanzar subagente de revision esceptica (obligatorio salvo cambios triviales)
+10. Si hallazgos criticos: corregir y repetir pasos 8-9 hasta veredicto `APROBADO`
+11. `/opsx-archive`: solo tras veredicto `APROBADO`
+
+**Fase C — Cierre (Git + Jira):**
+12. Actualizar `.intermarkit/architecture.md` / `functional.md` si el cambio lo requiere
+13. Commit final de cambios pendientes + `git push -u origin HEAD`
+14. Crear PR via MCP: `bitbucketPullRequest` (create) con titulo = commit message principal y descripcion = resumen de la propuesta OpenSpec. Si MCP Bitbucket no esta habilitado, informar al usuario para crearlo manualmente.
+15. Marcar criterios de aceptacion cumplidos: si la descripcion del issue tenia checkboxes markdown (`- [ ]`), releer la descripcion actual y marcar como `- [x]` solo los criterios realmente implementados y cubiertos por el veredicto `APROBADO` del adversarial-reviewer, via `editJiraIssue`. Nunca marcar un criterio sin verificarlo.
+16. Transicionar Jira a "In Testing": misma mecanica que paso 3 (`getTransitionsForJiraIssue` + `transitionJiraIssue`)
+17. Calcular metricas: tiempo transcurrido por timestamp (`started_at` del fichero vs hora actual, calculado por el agente, no por el hook) + `tool_calls` (leido en vivo del fichero, actualizado por el hook `postToolUse`). No incluir tokens/contexto: no son fiables a mitad de conversacion (ver nota tecnica abajo).
+18. Comentario resumen en Jira via `addCommentToJiraIssue` (markdown): rama, PR, resumen de cambios, criterios de aceptacion marcados, verificacion, tiempo dedicado, tool calls
+19. Verificar pipelines con `bitbucketPipelines` (list/get) tras crear el PR
+20. Si el usuario quiere trabajar en otra tarea Jira distinta, pedir que abra un chat nuevo (ver seccion 0.1)
+
+**Nota tecnica sobre metricas:** el hook `stop` (ver `hooks.json`) solo se ejecuta cuando el agente termina de responder, es decir, DESPUES de que el comentario de cierre ya se haya escrito en Jira dentro del mismo turno. Por eso `finished_at`/`elapsed_minutes`/`context_usage` del hook `stop` nunca estan disponibles a tiempo para ese comentario — el agente calcula el tiempo el mismo, y usa `tool_calls` (que si se actualiza en vivo via `postToolUse`) como metrica de actividad. El registro que deja el hook `stop` sirve solo como historico local en `.intermarkit/task-metrics/`.
+
+**Flujo de estados Jira del proyecto:**
+```
+To Do --> In Progress --> In Testing --> Done
+```
+Las transiciones se buscan siempre por nombre via `getTransitionsForJiraIssue` (los IDs varian entre proyectos). Si una transicion no existe, informar y continuar sin bloquear.
+
+### 6.4 Herramientas MCP Bitbucket disponibles
+Todas se invocan via el MCP `atlassian` (mismo servidor que Jira). Requieren API token auth habilitado por admin.
+
+| Herramienta | Acciones |
+|---|---|
+| `bitbucketWorkspace` | list, get |
+| `bitbucketRepository` | list, get |
+| `bitbucketPullRequest` | create, get, list, merge, approve, comment, comments, diff |
+| `bitbucketRepoContent` | branch.get, branch.create, commit.get, commit.create, files.get |
+| `bitbucketPipelines` | list, run, get, steps, step.get, step.log |
+| `bitbucketDeployments` | list, get |
+| `bitbucketEnvironments` | list, get, create, delete, update |
+
+### 6.5 Operaciones Git locales (siempre disponibles)
+Las operaciones con `git` via Shell funcionan independientemente de la verificacion MCP Bitbucket:
+- `git status`, `git diff`, `git log`
+- `git checkout`, `git branch`, `git merge`
+- `git add`, `git commit`, `git push`
+- `git stash`, `git rebase`
+
+Usa estas para todo el flujo local. Las herramientas MCP Bitbucket son para operaciones remotas (PRs, pipelines, crear ramas remotas sin push).
