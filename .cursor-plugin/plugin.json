@@ -1,7 +1,7 @@
 {
   "name": "intermarkit-dev",
-  "version": "0.5.0",
-  "description": "v0.5.0 - Plugin de desarrollo IntermarkIt: agente software-engineer con workflow OpenSpec, Jira/Bitbucket via MCP Atlassian (soporte multi-repo), cache MCP local, metricas por tarea con tokens reales de Cursor (incluye total y coste estimado en EUR), Fase D de validacion humana y comandos propios (/im-take, /im-close, /im-done, /im-status)",
+  "version": "0.6.0",
+  "description": "v0.6.0 - Plugin de desarrollo IntermarkIt: agente software-engineer con workflow OpenSpec, Jira/Bitbucket via MCP Atlassian (soporte multi-repo), cache MCP local, metricas por tarea con tokens reales de Cursor (incluye total y coste estimado en EUR), Fase D de validacion humana, gate tecnico que bloquea push sin verify+adversarial+archive completos, y comandos propios (/im-take, /im-close, /im-done, /im-status)",
   "author": {
     "name": "IntermarkIt"
   },

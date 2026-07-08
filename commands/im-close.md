@@ -9,7 +9,7 @@ Cierra la tarea activa (Fase C del workflow definido en `rules/intermarkit-globa
 
 ## Prerequisitos
 
-- La Fase B esta completa: `/opsx-verify` OK, `adversarial-reviewer` con veredicto `APROBADO`, `/opsx-archive` ejecutado.
+- La Fase B esta completa: `/opsx-verify` OK, `adversarial-reviewer` con veredicto `APROBADO`, `/opsx-archive` ejecutado. El bloque `verification` del fichero de metricas debe reflejar esto (`verify_passed`, `adversarial_verdict: "APROBADO"`, `archived` todos en `true`, o `exempt: true`) — el hook `workflow-gate.sh` bloqueara el `git push` del paso 3 si no es asi (ver `agents/reference.md §Gate tecnico de workflow`).
 - Existe una tarea activa: `.intermarkit/task-metrics/.active` debe apuntar a un fichero valido. Si no, aborta e informa al usuario.
 
 ## Pasos

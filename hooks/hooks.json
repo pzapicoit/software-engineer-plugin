@@ -4,6 +4,12 @@
     "sessionStart": [
       { "command": "${CURSOR_PLUGIN_ROOT}/hooks/session-context.sh" }
     ],
+    "beforeShellExecution": [
+      {
+        "command": "${CURSOR_PLUGIN_ROOT}/hooks/workflow-gate.sh",
+        "matcher": "git\\s+.*push"
+      }
+    ],
     "postToolUse": [
       { "command": "${CURSOR_PLUGIN_ROOT}/hooks/task-metrics-tooluse.sh" }
     ],

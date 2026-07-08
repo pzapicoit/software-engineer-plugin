@@ -39,11 +39,19 @@ Toma una tarea Jira y prepara el entorno (Fase A del workflow definido en `rules
      {
        "issue_key": "{ISSUE_KEY}",
        "started_at": "<ISO 8601 UTC>",
+       "verification": {
+         "verify_passed": false,
+         "adversarial_verdict": null,
+         "archived": false,
+         "exempt": false,
+         "exempt_reason": null
+       },
        "tool_calls": 0,
        "tokens": {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "turns": 0}
      }
      ```
      Si el proyecto es multi-repo, anade el campo `"repos": ["frontend", "backend"]` con los `name` seleccionados en el paso 4 (omitelo por completo en proyectos de un solo repo).
+     El campo `verification` es el gate tecnico que el hook `workflow-gate.sh` consulta antes de permitir `git push` (ver `agents/reference.md §Gate tecnico de workflow`). Se actualiza durante la Fase B — mientras quede en `false`/`null`, el push se bloquea salvo que se marque `exempt: true` con `exempt_reason` (cambios triviales, regla global §3).
    - Escribe el pointer `.intermarkit/task-metrics/.active` con `{ISSUE_KEY}.json`. Esto habilita el modo O(1) de los hooks `postToolUse`, `stop`, `preCompact` y `sessionEnd`.
 8. **Confirmar al usuario** — rama creada (en que repo(s), si aplica), Jira en "In Progress", metricas iniciadas, criterios de aceptacion detectados (o "sin checklist").
 9. **Sugerir siguiente paso** — continuar con la Fase B (`/opsx-propose` para spec-driven, o analisis directo si el requisito es claro).

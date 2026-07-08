@@ -114,6 +114,14 @@ Fichero por tarea. Schema:
   "issue_key": "PROJ-XXX",
   "started_at": "2026-07-07T20:00:00Z",
   "repos": ["frontend", "backend"],
+  "openspec_change": "PROJ-XXX-add-user-auth",
+  "verification": {
+    "verify_passed": false,
+    "adversarial_verdict": null,
+    "archived": false,
+    "exempt": false,
+    "exempt_reason": null
+  },
   "tool_calls": 42,
   "tokens": {
     "input": 1947096,
@@ -148,6 +156,8 @@ Fuentes de cada campo:
 |---|---|---|
 | `issue_key`, `started_at` | Agente (Fase A) | Al iniciar la tarea |
 | `repos` | Agente (Fase A) | Lista de `name` de los repos configurados (`repos:` en `config.yaml`) que afectan a esta tarea, segun respuesta del usuario. Solo presente en proyectos multi-repo; se omite por completo en proyectos de un solo repo |
+| `openspec_change` | Agente (Fase B, tras `/opsx-propose`) | Nombre del cambio OpenSpec (`openspec/changes/<nombre>/`) asociado a esta tarea. Permite trazar la tarea Jira al cambio OpenSpec correspondiente |
+| `verification` | Agente (Fase B) | Gate tecnico de calidad — ver `§Gate tecnico de workflow (verification)` abajo. El hook `workflow-gate.sh` lo lee antes de permitir `git push` |
 | `tool_calls` | Hook `postToolUse` | Incremento por cada llamada a herramienta, en vivo |
 | `tokens.input/output/cache_read/cache_write` | Hook `stop` | Suma acumulada de todos los turnos observados. Campos reales del payload de Cursor (`input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens`, v3.10.17+) |
 | `tokens.turns` | Hook `stop` | Numero de turnos observados |
@@ -157,6 +167,43 @@ Fuentes de cada campo:
 | `session_end_reason`, `final_status`, `session_id`, `is_background_agent` | Hook `sessionEnd` | Contexto del cierre |
 
 **IMPORTANTE:** los tokens del turno que ESCRIBE el comentario Jira todavia no estan en el fichero cuando se escribe (el hook `stop` de ese turno se dispara despues). El comentario refleja los tokens de los turnos previos; es una cota inferior aceptable.
+
+### Gate tecnico de workflow (`verification`)
+
+**Problema que resuelve:** la regla §3 (workflow OpenSpec) exige `verify` + revision adversarial `APROBADO` antes de `archive`, y `archive` antes de `push`/PR. Estas normas son texto — si el agente las omite (por prisa, distraccion, o mal entendimiento), nada lo impide tecnicamente. El bloque `verification` + el hook `workflow-gate.sh` convierten esa norma textual en un **bloqueo real** sobre `git push`.
+
+**Schema** (dentro de `.intermarkit/task-metrics/{ISSUE_KEY}.json`):
+
+```json
+{
+  "verification": {
+    "verify_passed": false,
+    "adversarial_verdict": null,
+    "archived": false,
+    "exempt": false,
+    "exempt_reason": null
+  }
+}
+```
+
+| Campo | Quien lo escribe | Cuando |
+|---|---|---|
+| `verify_passed` | Agente | `true` tras `/opsx-verify` sin errores (o verificacion manual si el perfil `core` no tiene `/opsx-verify`) |
+| `adversarial_verdict` | Agente | `"APROBADO"` tras que el subagente `adversarial-reviewer` devuelva ese veredicto. Cualquier otro valor (`null`, `"RECHAZADO CON HALLAZGOS"`, etc.) bloquea el push |
+| `archived` | Agente | `true` tras ejecutar `/opsx-archive` con exito |
+| `exempt` | Agente | `true` SOLO si el cambio cae en una excepcion de la regla §3 (typo/formatting, dependencia menor, cambio exclusivo en documentacion, fix menor de Fase D). Salta el gate por completo |
+| `exempt_reason` | Agente | Texto breve justificando el `exempt` (ej. `"fix de padding en boton, Fase D"`). Obligatorio si `exempt: true` |
+
+**Logica del gate** (`hooks/workflow-gate.sh`, evento `beforeShellExecution`, matcher sobre `git push`):
+
+1. Si no hay tarea activa (`.intermarkit/task-metrics/.active` no apunta a nada) → permite (no bloquea trabajo fuera del workflow gestionado).
+2. Si `verification.exempt == true` → permite.
+3. Si `verify_passed == true` AND `adversarial_verdict == "APROBADO"` AND `archived == true` → permite.
+4. En cualquier otro caso → `permission: "ask"` con mensaje explicando que falta, forzando aprobacion manual del usuario antes de continuar con el push.
+
+**Fail-open deliberado:** si `python3` no esta disponible, si el directorio de metricas no existe, o si el fichero de la tarea activa es ilegible, el hook permite la accion (no rompe proyectos que no usan este plugin o tareas fuera de su gestion). El gate solo aplica cuando hay una tarea activa gestionada por `/im-take`.
+
+**Quien escribe el bloque `verification`:** el agente `software-engineer`, en los pasos correspondientes de Fase B (`agents/software-engineer.md §Fase B`). No es responsabilidad de ningun hook — los hooks no pueden verificar la CALIDAD de un `verify`/revision adversarial, solo la presencia honesta del registro.
 
 ### Total de tokens y coste estimado
 

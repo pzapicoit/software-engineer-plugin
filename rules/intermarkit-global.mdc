@@ -117,6 +117,12 @@ Si `mcp_caches.bitbucket_verified == "fresh"`, salta la verificacion (usa la cac
 - Cambios exclusivos en documentacion
 - Fixes menores encontrados durante validacion humana (Fase D) — ver §6.3
 
+### 3.1 Gate tecnico (no depender solo de la palabra)
+
+Estos pasos NO son solo una convencion textual: el hook `workflow-gate.sh` bloquea (`permission: ask`) cualquier `git push` de la tarea activa mientras el bloque `verification` de `.intermarkit/task-metrics/{ISSUE_KEY}.json` no tenga `verify_passed`, `adversarial_verdict == "APROBADO"` y `archived` todos en `true` — salvo que `verification.exempt` sea `true` con un `exempt_reason` (para las excepciones de arriba). Ver `agents/reference.md §Gate tecnico de workflow` para el schema completo y `agents/software-engineer.md §Fase B` para en que paso exacto se escribe cada campo.
+
+Si un push se bloquea, NO es un fallo del hook: es la senal de que un paso de Fase B se salto. La accion correcta es completar el paso que falta, nunca forzar el push ni marcar `exempt` sin que aplique de verdad una excepcion real.
+
 ## 4. Modelo
 
 - El agente `software-engineer` esta fijado a `claude-4.6-sonnet-medium-thinking` (desarrollo/implementacion).
@@ -222,6 +228,8 @@ El plugin registra automaticamente 4 tipos de metricas en `.intermarkit/task-met
 | `finished_at`, `elapsed_ms` | `sessionEnd` | Al cerrarse el chat completo | NO — el hook se dispara despues del comentario Jira. El agente calcula el tiempo dedicado por timestamp (`started_at` vs `now`). |
 
 Regla practica para el comentario Jira: incluir tiempo (por timestamp), tool_calls, tokens y context_peak si existen. No inventar cifras — si `tokens.turns == 0`, omitir esas lineas.
+
+Ademas de los 4 hooks de metricas, el hook `workflow-gate.sh` (evento `beforeShellExecution`, matcher sobre `git push`) actua como gate tecnico del workflow OpenSpec — ver §3.1.
 
 ## 9. Comandos propios del plugin
 
