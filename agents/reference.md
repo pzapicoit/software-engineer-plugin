@@ -16,6 +16,8 @@ Todas las herramientas se invocan via el MCP `atlassian` (mismo servidor que Jir
 | `bitbucketDeployments` | list, get |
 | `bitbucketEnvironments` | list, get, create, delete, update |
 
+**Multi-repo:** cada llamada a estas herramientas opera sobre UN repositorio concreto (`workspace` + repo slug). En un proyecto multi-repo (§Multi-repo en `rules/intermarkit-global.mdc` §2.3bis), nunca reutilices el `workspace`/repositorio de un repo para operar sobre otro — resuelve siempre el par `workspace`/`url` desde la entrada correspondiente de `repos:` en `.intermarkit/config.yaml` antes de la llamada.
+
 ## Cache MCP (schema)
 
 Formato comun de todos los ficheros bajo `.intermarkit/cache/`:
@@ -111,6 +113,7 @@ Fichero por tarea. Schema:
 {
   "issue_key": "PROJ-XXX",
   "started_at": "2026-07-07T20:00:00Z",
+  "repos": ["frontend", "backend"],
   "tool_calls": 42,
   "tokens": {
     "input": 1947096,
@@ -144,6 +147,7 @@ Fuentes de cada campo:
 | Campo | Origen | Semantica |
 |---|---|---|
 | `issue_key`, `started_at` | Agente (Fase A) | Al iniciar la tarea |
+| `repos` | Agente (Fase A) | Lista de `name` de los repos configurados (`repos:` en `config.yaml`) que afectan a esta tarea, segun respuesta del usuario. Solo presente en proyectos multi-repo; se omite por completo en proyectos de un solo repo |
 | `tool_calls` | Hook `postToolUse` | Incremento por cada llamada a herramienta, en vivo |
 | `tokens.input/output/cache_read/cache_write` | Hook `stop` | Suma acumulada de todos los turnos observados. Campos reales del payload de Cursor (`input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens`, v3.10.17+) |
 | `tokens.turns` | Hook `stop` | Numero de turnos observados |
@@ -247,6 +251,8 @@ Ejemplos:
   OpenSpec verify + revision adversarial: APROBADO
   ```
 
+**Multi-repo:** un PR independiente por cada repo que recibio push (mismo titulo/formato convencional en todos, misma rama por convencion §6.1 de la regla global). La descripcion de cada PR puede acotarse a los cambios de ESE repo si el resumen de `proposal.md` distingue por componente; si no distingue, se puede reutilizar el mismo resumen en los PRs de los repos afectados.
+
 ## Plantilla de comentario Jira (cierre de tarea)
 
 `addCommentToJiraIssue` con `contentFormat: "markdown"`:
@@ -266,6 +272,15 @@ Ejemplos:
 - **Context peak:** 120K tokens (85% del window)  ← opcional, solo si hay `context_peak`
 ```
 
+**Variante multi-repo** — si el fichero de metricas trae `repos` con mas de un elemento, sustituye la linea `**Rama:**`/`**PR:**` por un bloque con una entrada por repo:
+
+```
+- **Rama:** `feature/PROJ-XXX-slug` (misma en todos los repos)
+- **PRs:**
+  - frontend: [enlace al PR, o "pendiente de crear manualmente"]
+  - backend: [enlace al PR, o "pendiente de crear manualmente"]
+```
+
 Reglas de formato:
 
 - **Tokens:** usa el bloque `tokens` del fichero de metricas. Formatea con `M`/`K` para legibilidad (`1_947_096` -> `1.9M`, `10_348` -> `10K`). `cache hit %` = `cache_read / input * 100` redondeado a entero.
@@ -273,6 +288,7 @@ Reglas de formato:
 - **Coste estimado:** calcula con la tabla de precios y la formula de §Total de tokens y coste estimado, usando `last_model` para elegir la tarifa. Formatea en euros con coma decimal y 2 decimales, siempre con el prefijo `≈` (p.ej. `≈ 5,23 €`) porque es una estimacion, no la factura real.
 - **Context peak:** solo incluir la linea si `context_peak` existe en el fichero (indica que hubo al menos una compactacion). Formato: `<tokens> (<percent>% del window)`.
 - **Tokens del turno actual:** no estan contabilizados (el hook `stop` se dispara despues del comentario). La cifra es una cota inferior aceptable — indicalo en el commit o en la documentacion si es relevante, pero no en el comentario Jira estandar.
+- **PR(s):** usa la linea singular `**PR:**` si `repos` no existe o tiene un solo elemento; usa el bloque `**PRs:**` (uno por repo) si tiene mas de uno. Omite el/los repo(s) que no recibieron push.
 - **Nunca inventar cifras:** si el bloque `tokens` no existe o `tokens.turns` es 0, omite las lineas de tokens, total, coste y context_peak.
 
 ## Flujo de estados Jira

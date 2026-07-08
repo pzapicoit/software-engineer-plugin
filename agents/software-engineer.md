@@ -82,13 +82,14 @@ flowchart TD
 
 ### Fase A — Preparar entorno
 
-1. **Crear rama** — `git checkout {default_branch} && git pull && git checkout -b feature/PROJ-XXX-slug` (o `bugfix/`/`hotfix/`). Convenciones: ver `reference.md §Convenciones Git`.
-2. **Transicionar Jira a "In Progress"**:
+1. **Resolver repo(s)** — lee `repos` / `is_multi_repo` del payload de `sessionStart`. Si `is_multi_repo` es `true`, **pregunta al usuario** que repo(s) configurados (por `name`) afectan a esta tarea antes de tocar nada. Si es `false`, sigue con el unico repo (`path: "."` en el caso legacy).
+2. **Crear rama** — para cada repo seleccionado, usando su `path`: `git -C "{path}" checkout {default_branch} && git -C "{path}" pull && git -C "{path}" checkout -b feature/PROJ-XXX-slug` (o `bugfix/`/`hotfix/`), mismo nombre de rama en todos. Convenciones: ver `reference.md §Convenciones Git`.
+3. **Transicionar Jira a "In Progress"**:
    - Consulta cache `.intermarkit/cache/jira-transitions-{PROJECT}.json` (§7 de la regla). Si `fresh`, usa el `transition_id` cacheado directamente.
    - Si `stale`/`missing`: `getTransitionsForJiraIssue`, encuentra la que lleve a "In Progress" por nombre, actualiza el cache (TTL 7d).
    - `transitionJiraIssue` con el ID.
    - Si la transicion no existe (workflow distinto), informa y continua sin bloquear.
-3. **Iniciar metricas**:
+4. **Iniciar metricas**:
    ```bash
    mkdir -p .intermarkit/task-metrics
    ```
@@ -101,6 +102,8 @@ flowchart TD
      "tokens": {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "turns": 0}
    }
    ```
+   Si el proyecto es multi-repo, anade `"repos": ["frontend", "backend"]` con los `name` seleccionados en el paso 1 (omite el campo por completo en proyectos de un solo repo).
+
    Los hooks del plugin acumulan automaticamente sobre este esquema (ver `agents/reference.md` §Metricas de tarea): `postToolUse` incrementa `tool_calls` en vivo; `stop` acumula `tokens.*` y `turns` cada vez que el agente responde; `preCompact` registra `context_peak` en cada compactacion; `sessionEnd` marca `finished_at`/`elapsed_ms` al cerrarse el chat.
 
    Escribe el pointer `.intermarkit/task-metrics/.active` con el nombre del fichero (`{PROJ-XXX}.json`). Esto habilita el modo O(1) de los hooks.
@@ -109,39 +112,39 @@ flowchart TD
 
 ### Fase B — Ciclo OpenSpec
 
-4. **Analiza** el requisito (claro o ambiguo).
-5. Si ambiguo: `/opsx-explore` antes de proponer.
-6. **Proponer** — `/opsx-propose` con nombre del cambio (ej: `PROJ-42-add-user-auth`). Genera `proposal.md`, `specs/`, `design.md`, `tasks.md`.
-7. **Revision** — presenta `proposal.md`, `specs/` y `design.md` de forma resumida. Da opinion tecnica (riesgos, alternativas). Pide aprobacion explicita. Si el usuario pide cambios, vuelve a `/opsx-propose` antes de continuar. NO implementes sin aprobacion.
-8. **Implementar** — `/opsx-apply` + commits parciales con formato convencional.
-9. **Verificar** — `/opsx-verify`. Si no esta disponible (perfil `core`), sugiere habilitarlo (`openspec config profile` + `openspec update`) o haz verificacion manual contra `tasks.md` + `specs/`.
-10. **Revision adversarial** — lanza el subagente `adversarial-reviewer` (Task tool) con el nombre del cambio.
+5. **Analiza** el requisito (claro o ambiguo).
+6. Si ambiguo: `/opsx-explore` antes de proponer.
+7. **Proponer** — `/opsx-propose` con nombre del cambio (ej: `PROJ-42-add-user-auth`). Genera `proposal.md`, `specs/`, `design.md`, `tasks.md`.
+8. **Revision** — presenta `proposal.md`, `specs/` y `design.md` de forma resumida. Da opinion tecnica (riesgos, alternativas). Pide aprobacion explicita. Si el usuario pide cambios, vuelve a `/opsx-propose` antes de continuar. NO implementes sin aprobacion.
+9. **Implementar** — `/opsx-apply` + commits parciales con formato convencional (en el repo correspondiente si es multi-repo).
+10. **Verificar** — `/opsx-verify`. Si no esta disponible (perfil `core`), sugiere habilitarlo (`openspec config profile` + `openspec update`) o haz verificacion manual contra `tasks.md` + `specs/`.
+11. **Revision adversarial** — lanza el subagente `adversarial-reviewer` (Task tool) con el nombre del cambio.
     - Hallazgos criticos: corrige, repite verify + adversarial hasta `APROBADO`.
     - Aprobado: continua al archivado.
     - Nunca omitir salvo excepciones triviales (regla §3).
-11. **Archivar** — `/opsx-archive` solo con veredicto `APROBADO`.
+12. **Archivar** — `/opsx-archive` solo con veredicto `APROBADO`.
 
 ### Fase C — Cierre (Git + Jira)
 
-12. **Actualizar docs** — si el cambio introdujo modulo/dependencia/decision arquitectonica, actualiza `.intermarkit/architecture.md` / `functional.md` (skill `architect` §Mantenimiento).
-13. **Commit final + push** — `git push -u origin HEAD`.
-14. **Crear PR** — `bitbucketPullRequest create` (via MCP). Titulo/descripcion segun `reference.md §PRs`. Si MCP Bitbucket no disponible, informa al usuario para crearlo manualmente.
-15. **Marcar criterios de aceptacion** — si el issue tenia `- [ ]`:
+13. **Actualizar docs** — si el cambio introdujo modulo/dependencia/decision arquitectonica, actualiza `.intermarkit/architecture.md` / `functional.md` (skill `architect` §Mantenimiento).
+14. **Commit final + push** — si la tarea es multi-repo (`repos` en el fichero de metricas), repite en cada repo de la lista usando su `path`: `git -C "{path}" push -u origin HEAD`. Omite el repo si no tuvo cambios. Si es un solo repo, ejecuta una vez en la raiz.
+15. **Crear PR(s)** — `bitbucketPullRequest create` (via MCP), una llamada por repo que recibio push, cada una contra su propio `workspace`/repositorio. Titulo/descripcion segun `reference.md §PRs`. Si MCP Bitbucket no disponible, informa al usuario para crearlo manualmente.
+16. **Marcar criterios de aceptacion** — si el issue tenia `- [ ]`:
     - Relee la `description` actual con `getJiraIssue` (puede haber cambiado).
     - Reescribela cambiando `- [ ]` a `- [x]` unicamente en los criterios realmente implementados y cubiertos por el veredicto `APROBADO`.
     - Aplica con `editJiraIssue` (`fields: {"description": "..."}`, `contentFormat: "markdown"`).
     - No marques criterios "a medias".
-16. **Transicionar Jira a "In Testing"** — misma mecanica que Fase A paso 2 (usa cache de transiciones).
-17. **Calcular metricas** — lee `.intermarkit/task-metrics/{PROJ-XXX}.json`:
+17. **Transicionar Jira a "In Testing"** — misma mecanica que Fase A paso 3 (usa cache de transiciones).
+18. **Calcular metricas** — lee `.intermarkit/task-metrics/{PROJ-XXX}.json`:
     - Tiempo: compara `started_at` con `date -u +%Y-%m-%dT%H:%M:%SZ`. No dependas de `elapsed_ms` (el hook `sessionEnd` lo rellena al cerrarse el chat, no antes).
     - Tool calls: `tool_calls` (contador en vivo del hook `postToolUse`).
     - Tokens: bloque `tokens` acumulado por el hook `stop` en cada turno (`input`, `output`, `cache_read`, `cache_write`, `turns`). Estos son los tokens de TODOS los turnos previos; el turno actual (el que va a escribir este comentario) todavia no esta contabilizado — es una aproximacion inferior aceptable.
     - Total y coste estimado en €: calcula segun `reference.md §Total de tokens y coste estimado` (formula + tabla de precios por modelo). Es una estimacion basada en tarifas de lista, nunca la factura real.
     - Contexto (opcional): si existe `context_peak`, ese es el pico maximo observado durante la tarea (solo se registra cuando Cursor compacta el contexto).
-18. **Comentario Jira** — `addCommentToJiraIssue` con la plantilla de `reference.md §Plantilla de comentario Jira`. Incluye tiempo, tool calls, tokens (formateados como M/K), total de tokens, coste estimado en € y context peak si existe.
-19. **Borrar pointer** — `rm .intermarkit/task-metrics/.active` (via Shell). Esto le indica al hook `postToolUse` que ya no hay tarea activa.
-20. **Confirmar cierre** al usuario.
-21. **Sugerir chat nuevo** para la siguiente tarea Jira distinta (regla §0.1).
+19. **Comentario Jira** — `addCommentToJiraIssue` con la plantilla de `reference.md §Plantilla de comentario Jira`. Incluye tiempo, tool calls, tokens (formateados como M/K), total de tokens, coste estimado en € y context peak si existe. Si `repos` tiene mas de un elemento, usa el bloque de PRs multiples de la plantilla.
+20. **Borrar pointer** — `rm .intermarkit/task-metrics/.active` (via Shell). Esto le indica al hook `postToolUse` que ya no hay tarea activa.
+21. **Confirmar cierre** al usuario.
+22. **Sugerir chat nuevo** para la siguiente tarea Jira distinta (regla §0.1).
 
 **Atajo:** `/im-close` ejecuta Fase C completa.
 

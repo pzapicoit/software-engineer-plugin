@@ -11,7 +11,7 @@ Esta regla se aplica SIEMPRE, en cualquier conversacion del proyecto, sin necesi
 
 En el **primer mensaje** de cada conversacion:
 
-1. Lee el contexto inyectado por el hook `sessionStart` (`agent_message`). Contiene un JSON con: `jira_project`, `repo_type`, `repo_workspace`, `repo_url`, `default_branch`, `current_branch`, `confluence_space`, `credentials_global_exists`, `architecture_docs_exists`, `openspec_initialized`, `active_task`, `mcp_caches`.
+1. Lee el contexto inyectado por el hook `sessionStart` (`agent_message`). Contiene un JSON con: `jira_project`, `repos` (lista normalizada de repositorios — ver §2.3bis), `is_multi_repo`, `current_branch`, `confluence_space`, `credentials_global_exists`, `architecture_docs_exists`, `openspec_initialized`, `active_task`, `mcp_caches`. Los campos `repo_type`/`repo_workspace`/`repo_url`/`default_branch` (singulares) solo vienen rellenos cuando `is_multi_repo` es `false` (compatibilidad con proyectos de un solo repo); en multi-repo usa siempre `repos`.
 2. Muestra la linea humana ya construida en `payload.message` (empieza por `[IntermarkIt] Proyecto: ...`).
 3. Si `config_exists: false`, anuncia "Este proyecto no tiene configuracion IntermarkIt" y sigue §2.3 antes de nada.
 
@@ -42,20 +42,52 @@ atlassian:
 ```
 
 ### 2.3 Config del proyecto (`.intermarkit/config.yaml`)
-Si no existe, pregunta clave del proyecto Jira (obligatorio), URL del repo (obligatorio), tipo (`bitbucket`/`github`/`gitlab`), workspace (solo bitbucket) y crea:
+Si no existe, pregunta clave del proyecto Jira (obligatorio) y si el proyecto es de **un solo repositorio** o **multi-repo** (frontend/backend/mobile/etc. en subcarpetas).
+
+- **Un solo repo:** pide URL, tipo (`bitbucket`/`github`/`gitlab`), workspace (solo bitbucket) y crea:
+  ```yaml
+  jira:
+    site: https://intermarkit.atlassian.net
+    project: <valor>
+  repo:
+    type: bitbucket
+    url: <valor>
+    workspace: <slug>
+    default_branch: main
+  docs:
+    confluence_space: <opcional>
+    url: ""
+  ```
+- **Multi-repo:** para cada repositorio pide nombre corto (`name`, ej. `frontend`), subcarpeta relativa a la raiz del proyecto donde vive ese repo Git (`path`), URL, tipo y workspace (solo bitbucket). Crea `repos:` (lista) en vez de `repo:` — ver schema completo y precedencia en §2.3bis.
+
+### 2.3bis Multi-repo: schema y convenciones
+
+Un proyecto puede tener varios repositorios Git (tipicamente uno por componente: frontend, backend, mobile...), cada uno en su propia subcarpeta dentro de la raiz del proyecto. Schema en `.intermarkit/config.yaml`:
+
 ```yaml
-jira:
-  site: https://intermarkit.atlassian.net
-  project: <valor>
-repo:
-  type: bitbucket
-  url: <valor>
-  workspace: <slug>
-  default_branch: main
-docs:
-  confluence_space: <opcional>
-  url: ""
+repos:
+  - name: frontend
+    path: frontend             # subcarpeta relativa a la raiz del proyecto
+    type: bitbucket
+    url: https://bitbucket.org/intermarkithub/frontend-repo
+    workspace: intermarkithub  # solo si type: bitbucket
+    default_branch: main
+  - name: backend
+    path: backend
+    type: bitbucket
+    url: https://bitbucket.org/intermarkithub/backend-repo
+    workspace: intermarkithub
+    default_branch: main
 ```
+
+Reglas:
+
+- `repos:` (lista) y `repo:` (singular, legacy) son mutuamente excluyentes. Si ambos existen en el fichero, `repos:` tiene prioridad y `repo:` se ignora.
+- Todas las operaciones Git sobre un repo concreto se ejecutan con `git -C "{ruta_proyecto}/{path}" ...` (o `cd` a esa subcarpeta), nunca asumiendo el cwd.
+- **Selección de repos por tarea:** al iniciar una tarea (`/im-take`, Fase A), si hay mas de un repo configurado, el agente PREGUNTA al usuario cuales de los repos configurados afectan a esa tarea concreta (una tarea puede tocar solo frontend, solo backend, o ambos). La seleccion se guarda en el fichero de metricas de la tarea (`repos: ["frontend", "backend"]`) para no volver a preguntar en Fase C.
+- **Ramas:** misma convencion de nombre de rama (§6.1) aplicada de forma independiente en cada repo seleccionado — mismo nombre de rama en todos, pero commits/push/PR independientes por repo.
+- **PRs:** un Pull Request por repo tocado, cada uno contra su propio `workspace`/`url`. Ver plantilla en `agents/reference.md`.
+- Si solo hay un repo configurado (`repo:` legacy o `repos:` con un unico elemento), el comportamiento es identico al de antes de esta funcionalidad: no se pregunta nada, todo ocurre en la raiz del proyecto.
 
 ### 2.4 Documentacion de arquitectura y funcional
 Si `architecture_docs_exists: false`, aplica la skill `architect` ANTES de implementar nada (brownfield: analiza el codigo primero; greenfield: define stack con el usuario).
@@ -63,7 +95,7 @@ Si `architecture_docs_exists: false`, aplica la skill `architect` ANTES de imple
 ### 2.5 OpenSpec
 Si `openspec_initialized: false`, ofrece `openspec init --tools cursor`. Si `/opsx-verify` no esta disponible (perfil `core`), sugiere `openspec config profile` + `openspec update`.
 
-### 2.6 Bitbucket (solo si `repo_type == "bitbucket"`)
+### 2.6 Bitbucket (solo si algun repo configurado es de tipo `bitbucket`)
 Si `mcp_caches.bitbucket_verified == "fresh"`, salta la verificacion (usa la cache — §7). Si esta `stale`/`missing`, ejecuta `bitbucketWorkspace list` via MCP; si funciona, cachea el resultado (§7). Si falla, informa: "Las herramientas Bitbucket requieren API token auth (Admin Hub > Rovo > Rovo MCP)". Las operaciones locales de Git siguen funcionando.
 
 ## 3. Workflow OpenSpec (spec-driven)
@@ -102,6 +134,8 @@ Si `mcp_caches.bitbucket_verified == "fresh"`, salta la verificacion (usa la cac
 
 `{slug-corto}` = 2-4 palabras del titulo en kebab-case. Ej: `feature/PROJ-42-auth-login`.
 
+**Multi-repo:** se usa el MISMO nombre de rama en cada repo seleccionado para la tarea (ver §2.3bis). No se varia el nombre entre repos aunque los commits/PRs sean independientes.
+
 ### 6.2 Commits convencionales
 `tipo(PROJ-XXX): descripcion breve` (feat / fix / refactor / test / docs / chore).
 
@@ -109,17 +143,17 @@ Si `mcp_caches.bitbucket_verified == "fresh"`, salta la verificacion (usa la cac
 
 Detalle paso a paso en el agente `software-engineer` (§Paso 3). Resumen:
 
-- **Fase A — Preparar entorno:** checkout desde `default_branch`, crear rama, transicionar Jira a "In Progress" (via `getTransitionsForJiraIssue` + `transitionJiraIssue`, usando cache de transiciones — §7), inicializar `.intermarkit/task-metrics/{PROJ-XXX}.json` y escribir el pointer `.active`.
+- **Fase A — Preparar entorno:** si multi-repo, pregunta que repo(s) afectan a la tarea (§2.3bis); checkout desde `default_branch`, crear rama en cada repo seleccionado, transicionar Jira a "In Progress" (via `getTransitionsForJiraIssue` + `transitionJiraIssue`, usando cache de transiciones — §7), inicializar `.intermarkit/task-metrics/{PROJ-XXX}.json` (incluye `repos` si es multi-repo) y escribir el pointer `.active`.
 - **Fase B — Implementar:** ciclo OpenSpec (propose -> review -> apply -> verify -> adversarial -> archive).
-- **Fase C — Cierre:** actualizar docs si aplica, commit final + push, crear PR (`bitbucketPullRequest` create), marcar criterios de aceptacion cumplidos en la descripcion Jira (`- [ ]` -> `- [x]`), transicionar a "In Testing", calcular metricas (tiempo por timestamp + `tool_calls` del fichero), anadir comentario Jira, borrar el pointer `.active`, sugerir chat nuevo para la siguiente tarea.
+- **Fase C — Cierre:** actualizar docs si aplica, commit final + push en cada repo tocado, crear un PR por repo (`bitbucketPullRequest` create), marcar criterios de aceptacion cumplidos en la descripcion Jira (`- [ ]` -> `- [x]`), transicionar a "In Testing", calcular metricas (tiempo por timestamp + `tool_calls` del fichero), anadir comentario Jira (con los PRs de todos los repos), borrar el pointer `.active`, sugerir chat nuevo para la siguiente tarea.
 
 ### 6.4 Herramientas MCP Bitbucket
 
-Ver [agents/reference.md §MCP Bitbucket](../agents/reference.md#mcp-bitbucket).
+Ver [agents/reference.md §MCP Bitbucket](../agents/reference.md#mcp-bitbucket). En multi-repo, cada llamada (`bitbucketPullRequest`, `bitbucketRepoContent`, etc.) usa el `workspace`/repositorio del repo concreto que se este tocando, no un valor global.
 
 ### 6.5 Operaciones Git locales
 
-`git status`, `diff`, `log`, `checkout`, `branch`, `merge`, `add`, `commit`, `push`, `stash`, `rebase` funcionan siempre via Shell, independientemente de la verificacion MCP.
+`git status`, `diff`, `log`, `checkout`, `branch`, `merge`, `add`, `commit`, `push`, `stash`, `rebase` funcionan siempre via Shell, independientemente de la verificacion MCP. En multi-repo, se ejecutan con `git -C "{path_del_repo}" ...` (o `cd` previo a esa subcarpeta) para cada repo tocado — nunca asumas que el cwd es el repo correcto.
 
 ## 7. Cache MCP local (`.intermarkit/cache/`)
 
@@ -151,7 +185,7 @@ Para ahorrar llamadas MCP repetitivas, el agente cachea localmente respuestas es
 2. El hook `sessionStart` ya expone `mcp_caches.{user_info,bitbucket_verified,transitions.<PROJECT>} = fresh|stale|missing`. Confia en ese dato si esta disponible.
 3. Tras una llamada MCP exitosa, escribe/actualiza el fichero de cache con el nuevo `cached_at` y el `ttl_seconds` de la tabla.
 4. Para transiciones Jira: guarda un dict `{"To Do": "11", "In Progress": "21", ...}` en `data`. Es estable por proyecto/workflow.
-5. **NO cachear** la `description` de issues Jira (cambia entre sesiones; §Fase C paso 15 la relee siempre).
+5. **NO cachear** la `description` de issues Jira (cambia entre sesiones; §Fase C "Marcar criterios de aceptacion" la relee siempre).
 
 ### 7.4 gitignore
 

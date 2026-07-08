@@ -17,18 +17,22 @@ Toma una tarea Jira y prepara el entorno (Fase A del workflow definido en `rules
 1. **Leer issue** — Usa `getJiraIssue` (`cloudId` = `jira.site` del config, `issueIdOrKey` = argumento, `fields` = `["summary","description","status","issuetype","priority","labels","components","assignee"]`, `responseContentFormat = "markdown"`). Extrae y guarda los criterios de aceptacion (`- [ ]` / `- [x]` en la description) para la Fase C.
 2. **Determinar tipo de rama** — `feature/` para stories, `bugfix/` para bugs no criticos, `hotfix/` para bugs criticos, segun `issuetype`.
 3. **Slug** — 2-4 palabras del `summary` en kebab-case.
-4. **Crear rama**:
+4. **Resolver repo(s)** — lee `repos` del payload de `sessionStart` (o `.intermarkit/config.yaml` si hace falta releer):
+   - Si `is_multi_repo` es `false` (un solo repo, `repo:` legacy o `repos:` con un elemento): usa ese repo directamente, sin preguntar nada. `path` = `.` en el caso legacy.
+   - Si `is_multi_repo` es `true`: **pregunta al usuario** que repo(s) de los configurados (`name` de cada entrada) afectan a esta tarea. Puede ser uno, varios o todos. Guarda la respuesta como lista de `name` para el paso 6 y la Fase C.
+5. **Crear rama** — para cada repo seleccionado (uno solo si es single-repo), usando su `path` (`.` en single-repo):
    ```bash
-   git checkout {default_branch}
-   git pull
-   git checkout -b {tipo}/{ISSUE_KEY}-{slug}
+   git -C "{path}" checkout {default_branch}
+   git -C "{path}" pull
+   git -C "{path}" checkout -b {tipo}/{ISSUE_KEY}-{slug}
    ```
-5. **Transicionar Jira a "In Progress"**:
+   Mismo nombre de rama en todos los repos seleccionados (regla §6.1 de la regla global).
+6. **Transicionar Jira a "In Progress"**:
    - Consulta cache `.intermarkit/cache/jira-transitions-{PROJECT}.json` (regla §7). Si `fresh`, usa el `transition_id` cacheado.
    - Si `stale`/`missing`: `getTransitionsForJiraIssue`, encuentra la que lleve a "In Progress" por nombre, actualiza la cache (TTL 604800s / 7d).
    - `transitionJiraIssue` con el ID.
    - Si no existe transicion, informa y continua.
-6. **Iniciar metricas**:
+7. **Iniciar metricas**:
    - `mkdir -p .intermarkit/task-metrics`
    - Escribe `.intermarkit/task-metrics/{ISSUE_KEY}.json` con:
      ```json
@@ -39,9 +43,10 @@ Toma una tarea Jira y prepara el entorno (Fase A del workflow definido en `rules
        "tokens": {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "turns": 0}
      }
      ```
+     Si el proyecto es multi-repo, anade el campo `"repos": ["frontend", "backend"]` con los `name` seleccionados en el paso 4 (omitelo por completo en proyectos de un solo repo).
    - Escribe el pointer `.intermarkit/task-metrics/.active` con `{ISSUE_KEY}.json`. Esto habilita el modo O(1) de los hooks `postToolUse`, `stop`, `preCompact` y `sessionEnd`.
-7. **Confirmar al usuario** — rama creada, Jira en "In Progress", metricas iniciadas, criterios de aceptacion detectados (o "sin checklist").
-8. **Sugerir siguiente paso** — continuar con la Fase B (`/opsx-propose` para spec-driven, o analisis directo si el requisito es claro).
+8. **Confirmar al usuario** — rama creada (en que repo(s), si aplica), Jira en "In Progress", metricas iniciadas, criterios de aceptacion detectados (o "sin checklist").
+9. **Sugerir siguiente paso** — continuar con la Fase B (`/opsx-propose` para spec-driven, o analisis directo si el requisito es claro).
 
 ## Nota
 

@@ -1,6 +1,6 @@
 # IntermarkIt Dev Plugin
 
-Plugin de Cursor para desarrolladores de IntermarkIt. Integra normas de trabajo siempre activas con workflow spec-driven (OpenSpec), gestion de tareas via Jira, Git/Bitbucket (MCP Atlassian incluido), cache MCP local para ahorrar peticiones y modelos fijados por rol (`claude-4.6-sonnet-medium-thinking` para desarrollo, `composer-2.5` para revision adversarial).
+Plugin de Cursor para desarrolladores de IntermarkIt. Integra normas de trabajo siempre activas con workflow spec-driven (OpenSpec), gestion de tareas via Jira, Git/Bitbucket (MCP Atlassian incluido, con soporte multi-repo para proyectos con frontend/backend/etc. en repos separados), cache MCP local para ahorrar peticiones y modelos fijados por rol (`claude-4.6-sonnet-medium-thinking` para desarrollo, `composer-2.5` para revision adversarial).
 
 ## Que incluye
 
@@ -9,10 +9,11 @@ Plugin de Cursor para desarrolladores de IntermarkIt. Integra normas de trabajo 
 - **Subagente `adversarial-reviewer`** — fijado a `composer-2.5`. Revision esceptica y readonly tras cada implementacion, antes de archivar.
 - **Skill `architect`** — documenta arquitectura y funcionalidad antes de implementar (brownfield o greenfield).
 - **Skill `python-development`** — buenas practicas Python (uv, ruff, mypy, pytest) y frameworks estandar (FastAPI, Django, Typer, SQLAlchemy).
+- **Multi-repo** — un proyecto puede tener uno o varios repositorios Git (frontend, backend, mobile...) en subcarpetas, configurados con `repos:` (lista) en vez de `repo:` (singular). El agente pregunta que repo(s) afectan a cada tarea y hace branch/commit/push/PR de forma independiente en cada uno, con la misma rama en todos. Ver `config-template.yaml` y `rules/intermarkit-global.mdc §2.3bis`.
 - **Comandos propios**:
-  - `/im-take {ISSUE_KEY}` — Fase A (rama + Jira "In Progress" + metricas + cache de transiciones).
-  - `/im-close` — Fase C (push + PR + criterios + Jira "In Testing" + comentario con metricas + limpieza).
-  - `/im-status` — resumen del estado (tarea activa, tiempo, tool calls, estado de la cache MCP). Readonly.
+  - `/im-take {ISSUE_KEY}` — Fase A (rama + Jira "In Progress" + metricas + cache de transiciones; en multi-repo, pregunta que repos toca la tarea).
+  - `/im-close` — Fase C (push + PR + criterios + Jira "In Testing" + comentario con metricas + limpieza; en multi-repo, un PR por repo tocado).
+  - `/im-status` — resumen del estado (tarea activa, tiempo, tool calls, estado de la cache MCP; en multi-repo, rama de cada repo). Readonly.
 - **MCP Atlassian** (`mcp.json`) — servidor oficial `https://mcp.atlassian.com/v1/mcp/authv2`. Cubre Jira, Confluence y **Bitbucket Cloud** (PRs, branches, pipelines, repos).
 - **Hook `sessionStart`** — inyecta contexto de proyecto + pre-checks (credentials, docs, openspec, tarea activa, estado cache MCP) al inicio de cada sesion. Evita 4-6 tool calls repetitivos.
 - **Hook `postToolUse`** — incrementa `tool_calls` en la tarea activa. O(1) via pointer `.active`, con lock (`fcntl.flock`) para tool calls concurrentes.
@@ -31,7 +32,7 @@ La regla guia el setup automaticamente:
 
 1. **Autentica MCP Atlassian** — si pide login OAuth, te guia para completarlo.
 2. **Crea config global** (`~/.intermarkit/credentials.yaml`) — si no existe.
-3. **Crea config de proyecto** (`.intermarkit/config.yaml`) — te pide clave Jira, URL repo, tipo, workspace.
+3. **Crea config de proyecto** (`.intermarkit/config.yaml`) — te pide clave Jira y, segun sea un proyecto de un solo repo o multi-repo, URL/tipo/workspace de uno o de cada repositorio (nombre, subcarpeta, URL, tipo, workspace).
 4. **Verifica OpenSpec** — si no esta inicializado, ofrece `openspec init --tools cursor`.
 5. **Verifica Bitbucket** — comprueba `bitbucketWorkspace` (requiere que un admin habilite API token auth).
 6. **Documenta arquitectura** (skill `architect`) — genera `.intermarkit/architecture.md` y `.intermarkit/functional.md`.
@@ -90,6 +91,35 @@ Detallado en la regla `rules/intermarkit-global.mdc` §6.3 y en `agents/software
 **Fase C — Cierre:** commit final + push + PR + marcar criterios Jira + Jira "In Testing" + calcular metricas + comentario Jira + borrar pointer `.active`. Tras cierre, sugerir chat nuevo para la siguiente tarea (una tarea Jira por conversacion).
 
 **Flujo de estados Jira:** `To Do -> In Progress -> In Testing -> Done`.
+
+## Multi-repo (frontend, backend, mobile, ...)
+
+Por defecto un proyecto tiene un unico repositorio (`repo:` en `config.yaml`, comportamiento sin cambios). Si el proyecto tiene varios repos en subcarpetas (ej: `./frontend`, `./backend`), usa `repos:` (lista) en su lugar:
+
+```yaml
+repos:
+  - name: frontend
+    path: frontend
+    type: bitbucket
+    url: https://bitbucket.org/intermarkithub/frontend-repo
+    workspace: intermarkithub
+    default_branch: main
+  - name: backend
+    path: backend
+    type: bitbucket
+    url: https://bitbucket.org/intermarkithub/backend-repo
+    workspace: intermarkithub
+    default_branch: main
+```
+
+Como funciona:
+
+- **Al tomar una tarea (`/im-take`)** — si hay mas de un repo configurado, el agente pregunta cuales afectan a esa tarea (uno, varios o todos). La respuesta se guarda en `.intermarkit/task-metrics/{ISSUE_KEY}.json` (`repos: ["frontend", "backend"]`) para no repetir la pregunta en el cierre.
+- **Ramas** — misma convencion de nombre (`feature/PROJ-XXX-slug`) en cada repo seleccionado.
+- **Al cerrar la tarea (`/im-close`)** — commit + push independiente por repo (se omite el que no tuvo cambios) y un Pull Request por repo, cada uno contra su propio `workspace`/URL.
+- **`/im-status`** — muestra la rama actual de cada repo configurado.
+
+`repos:` y `repo:` son mutuamente excluyentes; si ambos existen en el fichero, `repos:` tiene prioridad. Un proyecto de un solo repo (`repo:` o `repos:` con un unico elemento) se comporta exactamente igual que antes de esta funcionalidad — no se pregunta nada.
 
 ## Ahorro de peticiones
 
@@ -164,6 +194,7 @@ software-engineer-plugin/
   {
     "issue_key": "PROJ-42",
     "started_at": "2026-07-07T20:00:00Z",
+    "repos": ["frontend", "backend"],
     "tool_calls": 42,
     "tokens": {"input": 1947096, "output": 10348, "cache_read": 1506478, "cache_write": 440604, "turns": 3},
     "context_peak": {"tokens": 120000, "percent": 85, "window_size": 128000, "compactions": 2},
@@ -171,6 +202,7 @@ software-engineer-plugin/
     "last_model": "claude-4.6-sonnet-medium-thinking", "cursor_version": "3.10.17"
   }
   ```
+  (`repos` solo aparece en proyectos multi-repo; se omite por completo en proyectos de un solo repositorio.)
 - `.intermarkit/task-metrics/.active` — pointer a tarea activa (local, NO commitear).
 - `.intermarkit/task-metrics/.hooks.log` — log de errores de hooks (local, NO commitear).
 - `.intermarkit/cache/*.json` — cache MCP local (local, NO commitear).

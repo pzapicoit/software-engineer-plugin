@@ -9,14 +9,17 @@ Resumen del estado actual sin hacer cambios ni llamadas MCP. Solo lee ficheros l
 
 ## Pasos
 
-1. **Contexto de proyecto** — lee `.intermarkit/config.yaml`. Muestra `jira.project`, `repo.type`, `repo.workspace`, `repo.default_branch`, `docs.confluence_space` si existen.
-2. **Rama Git actual** — `git branch --show-current` via Shell.
+1. **Contexto de proyecto** — lee `.intermarkit/config.yaml`. Muestra `jira.project`, `docs.confluence_space` si existe, y el/los repo(s):
+   - Un solo repo (`repo:` legacy o `repos:` con un elemento): `type`, `workspace`, `default_branch`.
+   - Multi-repo (`repos:` con varios elementos): lista con `name`, `type`, `workspace`, `default_branch` de cada uno.
+2. **Rama Git actual** — para cada repo configurado, `git -C "{path}" branch --show-current` via Shell (`path` = `.` en single-repo). En multi-repo, muestra una rama por repo.
 3. **Tarea activa** — comprueba `.intermarkit/task-metrics/.active`:
    - Si existe, lee el fichero apuntado (`.intermarkit/task-metrics/{ISSUE_KEY}.json`) y muestra:
      - `issue_key`
      - `started_at` (ISO)
      - Tiempo transcurrido calculado en minutos (`now - started_at`, con `date -u`)
      - `tool_calls` (contador en vivo del hook `postToolUse`)
+     - `repos` (lista de `name`) si el proyecto es multi-repo y el campo existe — indica que repos toca esta tarea concreta.
      - `tokens.input` / `output` / total / `cache hit %` / `turns` si el bloque `tokens` existe (acumulado por el hook `stop`). Formato M/K. Total y formulas en `agents/reference.md §Total de tokens y coste estimado`.
      - Coste estimado en € (misma seccion de referencia, usa `last_model` para la tarifa). Prefijo `≈`, no es facturacion real.
      - `context_peak.tokens` / `percent` si existe (hook `preCompact`).
@@ -49,6 +52,14 @@ Presenta como una tabla o lista markdown compacta, priorizando lo relevante:
 ```
 
 Omite las lineas de `Tokens`, `Coste estimado` y `Context peak` si el fichero no las tiene (tarea recien empezada o Cursor no ha disparado aun los hooks correspondientes).
+
+**Variante multi-repo** — sustituye `**Proyecto:**`/`**Rama actual:**` por una linea por repo (o una linea `Repos:` compacta) y anade que repos toca la tarea activa:
+
+```
+**Proyecto:** PROJ
+**Repos:** frontend (bitbucket/intermarkithub, main) → feature/PROJ-42-auth-login | backend (bitbucket/intermarkithub, main) → main
+**Tarea activa:** PROJ-42 · iniciada hace 45 min · 87 tool calls · repos: frontend, backend
+```
 
 ## Nota
 

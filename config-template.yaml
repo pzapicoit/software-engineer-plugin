@@ -12,11 +12,34 @@ jira:
   site: https://intermarkit.atlassian.net
   project: PROJ  # Clave del proyecto Jira (ej: PROJ, DEV, WEB)
 
+# --- Repositorio(s) ---
+# Usa UNA de las dos opciones siguientes, nunca ambas. Si el fichero define
+# `repos:` (lista), tiene prioridad y `repo:` (si tambien estuviera) se ignora.
+
+# Opcion A) Proyecto de un solo repositorio (caso mas comun).
 repo:
   type: bitbucket             # bitbucket | github | gitlab
   url: https://bitbucket.org/intermarkithub/nombre-repo
   workspace: intermarkithub   # workspace slug de Bitbucket (solo para bitbucket)
   default_branch: main        # rama principal del repositorio
+
+# Opcion B) Proyecto multi-repo (frontend, backend, mobile, etc. en subcarpetas
+# del mismo proyecto). Descomenta el bloque `repos:` y borra (o deja comentado)
+# el bloque `repo:` de arriba.
+#
+# repos:
+#   - name: frontend               # identificador corto, se usa en ramas/PRs/preguntas del agente
+#     path: frontend                # subcarpeta relativa a la raiz del proyecto (debe ser un repo Git valido)
+#     type: bitbucket               # bitbucket | github | gitlab
+#     url: https://bitbucket.org/intermarkithub/frontend-repo
+#     workspace: intermarkithub     # solo si type: bitbucket
+#     default_branch: main
+#   - name: backend
+#     path: backend
+#     type: bitbucket
+#     url: https://bitbucket.org/intermarkithub/backend-repo
+#     workspace: intermarkithub
+#     default_branch: main
 
 docs:
   confluence_space: ""  # Opcional: clave del espacio Confluence (ej: DEV)

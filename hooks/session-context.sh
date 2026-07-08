@@ -42,10 +42,72 @@ current_branch = sys.argv[2] or "N/A"
 project_dir = Path(sys.argv[3])
 
 
-def load_yaml(path: str) -> dict | None:
-    """Carga un YAML sencillo. Usa PyYAML si esta disponible; si no, parser minimo por
-    lineas ('clave: valor', indentacion de 2 espacios para anidacion).
+def load_yaml_minimal(raw: str) -> dict:
+    """Parser YAML muy simple (sin dependencias): soporta mapeos anidados y listas
+    de mapeos (necesario para `repos:`), con indentacion de 2 espacios. No es un
+    parser YAML completo (sin listas de escalares multilinea complejas, anchors,
+    multilinea con `|`/`>`, etc.) — cubre el subconjunto que usa este plugin.
     """
+    lines: list[tuple[int, str]] = []
+    for line in raw.splitlines():
+        stripped_hash = line.split("#", 1)[0]
+        stripped = stripped_hash.rstrip()
+        if not stripped.strip():
+            continue
+        indent = len(stripped) - len(stripped.lstrip(" "))
+        lines.append((indent, stripped.strip()))
+
+    pos = 0
+
+    def parse_scalar(value: str) -> str:
+        return value.strip().strip('"').strip("'")
+
+    def parse_block(indent: int):
+        nonlocal pos
+        if pos < len(lines) and lines[pos][0] == indent and lines[pos][1].startswith("- "):
+            seq: list = []
+            while pos < len(lines) and lines[pos][0] == indent and lines[pos][1].startswith("- "):
+                item_indent, content = lines[pos]
+                content = content[2:]
+                sub_indent = item_indent + 2
+                pos += 1
+                if ":" in content:
+                    key, _, value = content.partition(":")
+                    key = key.strip()
+                    value = value.strip()
+                    item: dict = {}
+                    item[key] = parse_block(sub_indent) if value == "" else parse_scalar(value)
+                    while pos < len(lines) and lines[pos][0] == sub_indent and not lines[pos][1].startswith("- "):
+                        k2, _, v2 = lines[pos][1].partition(":")
+                        k2 = k2.strip()
+                        v2 = v2.strip()
+                        pos += 1
+                        item[k2] = parse_block(sub_indent + 2) if v2 == "" else parse_scalar(v2)
+                    seq.append(item)
+                else:
+                    seq.append(parse_scalar(content))
+            return seq
+
+        mapping: dict = {}
+        while pos < len(lines) and lines[pos][0] == indent:
+            content = lines[pos][1]
+            if ":" not in content:
+                pos += 1
+                continue
+            key, _, value = content.partition(":")
+            key = key.strip()
+            value = value.strip()
+            pos += 1
+            mapping[key] = parse_block(indent + 2) if value == "" else parse_scalar(value)
+        return mapping
+
+    result = parse_block(0)
+    return result if isinstance(result, dict) else {}
+
+
+def load_yaml(path: str) -> dict | None:
+    """Carga un YAML sencillo. Usa PyYAML si esta disponible; si no, parser minimo
+    propio (`load_yaml_minimal`, soporta listas de mapeos para `repos:`)."""
     if not os.path.isfile(path):
         return None
     try:
@@ -62,30 +124,7 @@ def load_yaml(path: str) -> dict | None:
     except ImportError:
         pass
 
-    result: dict = {}
-    stack: list[tuple[int, dict]] = [(0, result)]
-    for line in raw.splitlines():
-        stripped_hash = line.split("#", 1)[0]
-        stripped = stripped_hash.rstrip()
-        if not stripped.strip():
-            continue
-        indent = len(stripped) - len(stripped.lstrip(" "))
-        content = stripped.strip()
-        if ":" not in content:
-            continue
-        key, _, value = content.partition(":")
-        key = key.strip()
-        value = value.strip().strip('"').strip("'")
-        while stack and indent < stack[-1][0]:
-            stack.pop()
-        parent = stack[-1][1]
-        if value == "":
-            new_dict: dict = {}
-            parent[key] = new_dict
-            stack.append((indent + 2, new_dict))
-        else:
-            parent[key] = value
-    return result
+    return load_yaml_minimal(raw)
 
 
 def cache_state(cache_dir: Path, filename: str) -> str:
@@ -203,27 +242,102 @@ if config is None:
     sys.exit(0)
 
 jira = config.get("jira") or {}
-repo = config.get("repo") or {}
 docs = config.get("docs") or {}
+
+# Normaliza repo(s) a una lista unica en payload["repos"], sea cual sea el
+# formato usado en config.yaml. `repos:` (lista, multi-repo) tiene prioridad
+# sobre `repo:` (legacy, un solo repositorio) si ambos existieran.
+raw_repos = config.get("repos")
+repos_list: list[dict] = []
+if isinstance(raw_repos, list) and raw_repos:
+    for entry in raw_repos:
+        if not isinstance(entry, dict):
+            continue
+        repos_list.append(
+            {
+                "name": entry.get("name"),
+                "path": entry.get("path") or ".",
+                "type": entry.get("type"),
+                "url": entry.get("url"),
+                "workspace": entry.get("workspace"),
+                "default_branch": entry.get("default_branch") or "main",
+            }
+        )
+else:
+    legacy_repo = config.get("repo") or {}
+    if legacy_repo:
+        repos_list.append(
+            {
+                "name": None,
+                "path": ".",
+                "type": legacy_repo.get("type"),
+                "url": legacy_repo.get("url"),
+                "workspace": legacy_repo.get("workspace"),
+                "default_branch": legacy_repo.get("default_branch") or "main",
+            }
+        )
+
+# Rama actual por repo (git -C <project_dir>/<path>). Para el repo con path "."
+# reutiliza current_branch (ya calculado antes de invocar python, sin coste extra).
+for repo_entry in repos_list:
+    if repo_entry["path"] == ".":
+        repo_entry["current_branch"] = current_branch
+    else:
+        repo_path = project_dir / repo_entry["path"]
+        try:
+            import subprocess
+
+            out = subprocess.run(
+                ["git", "-C", str(repo_path), "branch", "--show-current"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            repo_entry["current_branch"] = out.stdout.strip() or "N/A"
+        except (OSError, ValueError):
+            repo_entry["current_branch"] = "N/A"
 
 payload["jira_project"] = jira.get("project")
 payload["jira_site"] = jira.get("site") or "https://intermarkit.atlassian.net"
-payload["repo_type"] = repo.get("type")
-payload["repo_url"] = repo.get("url")
-payload["repo_workspace"] = repo.get("workspace")
-payload["default_branch"] = repo.get("default_branch") or "main"
+payload["repos"] = repos_list
+payload["is_multi_repo"] = len(repos_list) > 1
+
+# Campos singulares legacy: solo se rellenan cuando hay exactamente un repo
+# configurado (compatibilidad con integraciones existentes que los leian
+# directamente). En multi-repo, usa siempre payload["repos"].
+if len(repos_list) == 1:
+    only = repos_list[0]
+    payload["repo_type"] = only["type"]
+    payload["repo_url"] = only["url"]
+    payload["repo_workspace"] = only["workspace"]
+    payload["default_branch"] = only["default_branch"]
+else:
+    payload["repo_type"] = None
+    payload["repo_url"] = None
+    payload["repo_workspace"] = None
+    payload["default_branch"] = None
+
 confluence = docs.get("confluence_space") or ""
 payload["confluence_space"] = confluence if confluence else None
 
 # Mensaje humano compacto (una linea) que Cursor muestra al inicio.
 parts = [f"Proyecto: {payload['jira_project']}"]
-if payload["repo_type"]:
-    parts.append(f"Repo: {payload['repo_type']}")
-if payload["repo_workspace"]:
-    parts.append(f"Workspace: {payload['repo_workspace']}")
-if payload["default_branch"]:
-    parts.append(f"Branch: {payload['default_branch']}")
-parts.append(f"Rama actual: {payload['current_branch']}")
+if len(repos_list) == 1:
+    only = repos_list[0]
+    if only["type"]:
+        parts.append(f"Repo: {only['type']}")
+    if only["workspace"]:
+        parts.append(f"Workspace: {only['workspace']}")
+    if only["default_branch"]:
+        parts.append(f"Branch: {only['default_branch']}")
+    parts.append(f"Rama actual: {payload['current_branch']}")
+elif len(repos_list) > 1:
+    repos_summary = ", ".join(
+        f"{r['name'] or r['path']}@{r['current_branch']}" for r in repos_list
+    )
+    parts.append(f"Repos: {repos_summary}")
+else:
+    parts.append(f"Rama actual: {payload['current_branch']}")
 if payload["confluence_space"]:
     parts.append(f"Confluence: {payload['confluence_space']}")
 if payload["active_task"] and payload["active_task"].get("issue_key"):

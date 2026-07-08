@@ -2,6 +2,22 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). Versiones semanticas.
 
+## [0.4.0] — 2026-07-08
+
+### Added
+
+- **Soporte multi-repo en la configuracion del proyecto.** Un proyecto puede tener uno o varios repositorios Git (ej: frontend, backend, mobile) en subcarpetas de la raiz del proyecto:
+  - Nuevo schema `repos:` (lista) en `.intermarkit/config.yaml`, cada entrada con `name`, `path` (subcarpeta), `type`, `url`, `workspace` (solo bitbucket) y `default_branch`. Convive con el schema legacy `repo:` (singular, un solo repositorio) — si ambos existen, `repos:` tiene prioridad. Documentado y con ejemplo comentado en `config-template.yaml`.
+  - **`hooks/session-context.sh`** — normaliza cualquiera de los dos formatos en `payload["repos"]` (lista, siempre presente) y `payload["is_multi_repo"]`; calcula la rama actual de cada repo con `git -C`. El parser YAML minimo (fallback sin PyYAML) se ha extendido para soportar listas de mapeos (necesario para `repos:`), no solo mapeos anidados.
+  - **`/im-take`, `agents/software-engineer.md` (Fase A)** — si el proyecto es multi-repo, el agente pregunta al usuario que repo(s) configurados afectan a la tarea antes de crear rama; la seleccion se guarda en `.intermarkit/task-metrics/{ISSUE_KEY}.json` (`repos: ["frontend", "backend"]`) para no repetir la pregunta en el cierre. Mismo nombre de rama en todos los repos seleccionados.
+  - **`/im-close`, `agents/software-engineer.md` (Fase C)** — commit/push independiente por repo tocado (se omiten los repos sin cambios) y un Pull Request por repo contra su propio `workspace`/URL. El comentario Jira de cierre usa un bloque `**PRs:**` (uno por repo) cuando hay mas de un repo, o la linea singular `**PR:**` si solo hay uno.
+  - **`/im-status`** — muestra la rama actual de cada repo configurado y que repos toca la tarea activa.
+  - **`rules/intermarkit-global.mdc`** — nueva §2.3bis con el schema completo, precedencia `repos:` > `repo:`, convenciones de ramas/PRs multi-repo y regla de "preguntar siempre que repos afectan a la tarea"; §2.6 (verificacion Bitbucket) ahora se dispara si ALGUN repo configurado es bitbucket, no solo el unico repo legacy.
+  - **`agents/reference.md`** — documenta el campo opcional `repos` en el schema de metricas de tarea, la plantilla de PR/comentario Jira en variante multi-repo y la regla de no mezclar `workspace`/repositorio entre repos al llamar a las herramientas MCP Bitbucket.
+  - Proyectos de un solo repositorio (la mayoria) no cambian de comportamiento: no se pregunta nada nuevo, todo sigue ocurriendo en la raiz del proyecto.
+- **`README.md`** — nueva seccion "Multi-repo" con ejemplo de configuracion y explicacion del flujo.
+- **`.cursor-plugin/plugin.json`** — bump a `0.4.0` (funcionalidad nueva, no rompe compatibilidad).
+
 ## [0.3.5] — 2026-07-08
 
 ### Added
