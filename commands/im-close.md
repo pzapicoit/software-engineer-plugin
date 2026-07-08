@@ -41,8 +41,9 @@ Cierra la tarea activa (Fase C del workflow definido en `rules/intermarkit-globa
    - Tiempo: `started_at` vs `date -u +%Y-%m-%dT%H:%M:%SZ` (no dependas de `elapsed_ms`, lo rellena `sessionEnd`).
    - Tool calls: `tool_calls` (hook `postToolUse` en vivo).
    - Tokens: bloque `tokens` (`input`, `output`, `cache_read`, `cache_write`, `turns`) acumulado por el hook `stop`. Cota inferior: el turno actual no esta contabilizado aun.
+   - Total y coste estimado: calcula segun `agents/reference.md §Total de tokens y coste estimado` (usa el one-liner Python sugerido para precision, con `last_model` del fichero).
    - Context peak: bloque `context_peak` si existe (hook `preCompact`).
-8. **Comentario Jira** — `addCommentToJiraIssue` con la plantilla de `agents/reference.md` §Plantilla de comentario Jira. Incluye tiempo, tool calls y tokens (formato M/K + cache hit %). Anade la linea de `context peak` solo si el fichero la trae. No inventes cifras: si `tokens.turns == 0`, omite esas lineas.
+8. **Comentario Jira** — `addCommentToJiraIssue` con la plantilla de `agents/reference.md` §Plantilla de comentario Jira. Incluye tiempo, tool calls, tokens (formato M/K + cache hit %), total de tokens y coste estimado en € (prefijo `≈`). Anade la linea de `context peak` solo si el fichero la trae. No inventes cifras: si `tokens.turns == 0`, omite esas lineas.
 9. **Borrar pointer** — `rm .intermarkit/task-metrics/.active`. Esto desactiva el hook `postToolUse` para esta tarea (el hook `stop` tambien lo hace por si acaso).
 10. **Confirmar cierre** al usuario:
     - Rama pusheada + PR creado (o pendiente)

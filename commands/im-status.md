@@ -17,7 +17,8 @@ Resumen del estado actual sin hacer cambios ni llamadas MCP. Solo lee ficheros l
      - `started_at` (ISO)
      - Tiempo transcurrido calculado en minutos (`now - started_at`, con `date -u`)
      - `tool_calls` (contador en vivo del hook `postToolUse`)
-     - `tokens.input` / `output` / `cache hit %` / `turns` si el bloque `tokens` existe (acumulado por el hook `stop`). Formato M/K.
+     - `tokens.input` / `output` / total / `cache hit %` / `turns` si el bloque `tokens` existe (acumulado por el hook `stop`). Formato M/K. Total y formulas en `agents/reference.md §Total de tokens y coste estimado`.
+     - Coste estimado en € (misma seccion de referencia, usa `last_model` para la tarifa). Prefijo `≈`, no es facturacion real.
      - `context_peak.tokens` / `percent` si existe (hook `preCompact`).
      - `last_model` y `cursor_version` si estan.
    - Si no existe pointer, informa "sin tarea activa".
@@ -39,14 +40,15 @@ Presenta como una tabla o lista markdown compacta, priorizando lo relevante:
 **Proyecto:** PROJ (bitbucket / intermarkithub / rama default: main)
 **Rama actual:** feature/PROJ-42-auth-login
 **Tarea activa:** PROJ-42 · iniciada hace 45 min · 87 tool calls
-**Tokens:** input 1.9M · output 10K · cache hit 77% · turns 3
+**Tokens:** input 1.9M · output 10K · total 1.96M · cache hit 77% · turns 3
+**Coste estimado:** ≈ 5,23 €
 **Context peak:** 120K tokens (85% del window), 2 compactaciones
 **Cambio OpenSpec:** PROJ-42-add-auth (12/18 tareas)
 **Docs:** architecture.md ok, functional.md ok
 **Cache MCP:** user_info fresh (28d restantes), transitions.PROJ fresh (6d), bitbucket_verified stale
 ```
 
-Omite las lineas de `Tokens` y `Context peak` si el fichero no las tiene (tarea recien empezada o Cursor no ha disparado aun los hooks correspondientes).
+Omite las lineas de `Tokens`, `Coste estimado` y `Context peak` si el fichero no las tiene (tarea recien empezada o Cursor no ha disparado aun los hooks correspondientes).
 
 ## Nota
 

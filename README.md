@@ -16,7 +16,7 @@ Plugin de Cursor para desarrolladores de IntermarkIt. Integra normas de trabajo 
 - **MCP Atlassian** (`mcp.json`) — servidor oficial `https://mcp.atlassian.com/v1/mcp/authv2`. Cubre Jira, Confluence y **Bitbucket Cloud** (PRs, branches, pipelines, repos).
 - **Hook `sessionStart`** — inyecta contexto de proyecto + pre-checks (credentials, docs, openspec, tarea activa, estado cache MCP) al inicio de cada sesion. Evita 4-6 tool calls repetitivos.
 - **Hook `postToolUse`** — incrementa `tool_calls` en la tarea activa. O(1) via pointer `.active`, con lock (`fcntl.flock`) para tool calls concurrentes.
-- **Hook `stop`** — al final de cada turno del agente acumula tokens reales (`input`, `output`, `cache_read`, `cache_write`) y cuenta de turnos. Los campos vienen del payload real de Cursor (v3.10.17+): `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens`. Ya no marca `finished_at` — esa semantica corresponde a `sessionEnd`.
+- **Hook `stop`** — al final de cada turno del agente acumula tokens reales (`input`, `output`, `cache_read`, `cache_write`) y cuenta de turnos. Los campos vienen del payload real de Cursor (v3.10.17+): `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens`. Ya no marca `finished_at` — esa semantica corresponde a `sessionEnd`. El total de tokens y el coste estimado en € (tarifas de lista por modelo, ver `agents/reference.md`) se calculan al reportar, no los acumula el hook.
 - **Hook `sessionEnd`** — al cerrarse la conversacion marca `finished_at`/`elapsed_ms` usando `duration_ms` del payload de Cursor (fiable). Registro historico local; no borra el pointer `.active` para permitir continuar la tarea en otro chat.
 - **Hook `preCompact`** — cada vez que Cursor compacta el contexto por presion del window, registra el `context_peak` (tokens, porcentaje, window size) y cuenta compactaciones. Es la mejor fuente de datos sobre uso real de contexto.
 - **Cache MCP local (`.intermarkit/cache/`)** — respuestas estables cacheadas con TTL: `atlassian-user.json` (30d), `jira-transitions-{PROJECT}.json` (7d), `bitbucket-verified.json` (24h). El agente lee la cache antes de llamar al MCP y la actualiza tras cada llamada exitosa.
@@ -110,6 +110,7 @@ Cada tarea Jira genera `.intermarkit/task-metrics/{ISSUE_KEY}.json` con datos re
 |---|---|---|
 | Tool calls | Hook `postToolUse` (incremento en vivo) | Si |
 | Tokens (input/output/cache_read/cache_write/turns) | Hook `stop` (payload real de Cursor v3.10.17+: `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens`) | Si, cota inferior — el turno actual (el que escribe el comentario Jira) no esta contabilizado |
+| Total de tokens (input + output) y coste estimado en € | Calculado por el agente al reportar, a partir del bloque `tokens` y una tabla de precios por modelo (`agents/reference.md §Total de tokens y coste estimado`) | Estimacion sobre tarifas de lista, no factura real — siempre con prefijo `≈` |
 | Context peak | Hook `preCompact` (`context_tokens`, `context_usage_percent`, `context_window_size`) | Solo si Cursor compacta el contexto al menos una vez |
 | Tiempo dedicado | Agente en Fase C: `started_at` vs `now` (por timestamp). El hook `sessionEnd` rellena `elapsed_ms` a posteriori usando `duration_ms` del payload | Si |
 

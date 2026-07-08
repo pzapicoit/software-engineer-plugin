@@ -136,8 +136,9 @@ flowchart TD
     - Tiempo: compara `started_at` con `date -u +%Y-%m-%dT%H:%M:%SZ`. No dependas de `elapsed_ms` (el hook `sessionEnd` lo rellena al cerrarse el chat, no antes).
     - Tool calls: `tool_calls` (contador en vivo del hook `postToolUse`).
     - Tokens: bloque `tokens` acumulado por el hook `stop` en cada turno (`input`, `output`, `cache_read`, `cache_write`, `turns`). Estos son los tokens de TODOS los turnos previos; el turno actual (el que va a escribir este comentario) todavia no esta contabilizado — es una aproximacion inferior aceptable.
+    - Total y coste estimado en €: calcula segun `reference.md §Total de tokens y coste estimado` (formula + tabla de precios por modelo). Es una estimacion basada en tarifas de lista, nunca la factura real.
     - Contexto (opcional): si existe `context_peak`, ese es el pico maximo observado durante la tarea (solo se registra cuando Cursor compacta el contexto).
-18. **Comentario Jira** — `addCommentToJiraIssue` con la plantilla de `reference.md §Plantilla de comentario Jira`. Incluye tiempo, tool calls, tokens (formateados como M/K) y context peak si existe.
+18. **Comentario Jira** — `addCommentToJiraIssue` con la plantilla de `reference.md §Plantilla de comentario Jira`. Incluye tiempo, tool calls, tokens (formateados como M/K), total de tokens, coste estimado en € y context peak si existe.
 19. **Borrar pointer** — `rm .intermarkit/task-metrics/.active` (via Shell). Esto le indica al hook `postToolUse` que ya no hay tarea activa.
 20. **Confirmar cierre** al usuario.
 21. **Sugerir chat nuevo** para la siguiente tarea Jira distinta (regla §0.1).
@@ -155,7 +156,7 @@ flowchart TD
 7. Nunca implementar sin docs de arquitectura (skill `architect` primero).
 8. Una tarea Jira por conversacion — tras cerrar, chat nuevo para la siguiente.
 9. Nunca marcar un criterio de aceptacion sin verificarlo.
-10. Solo reportar metricas que provengan del fichero `.intermarkit/task-metrics/{PROJ-XXX}.json` (tiempo por timestamp, tool_calls del hook `postToolUse`, tokens acumulados por el hook `stop`, context_peak del hook `preCompact`). Nunca inventar valores; si un campo esta ausente en el fichero, omitelo del comentario en vez de estimarlo.
+10. Solo reportar metricas que provengan del fichero `.intermarkit/task-metrics/{PROJ-XXX}.json` (tiempo por timestamp, tool_calls del hook `postToolUse`, tokens acumulados por el hook `stop`, context_peak del hook `preCompact`), o que sean calculos derivados directamente de esos datos con la formula documentada (total de tokens, coste estimado en € — ver `reference.md §Total de tokens y coste estimado`). Nunca inventar valores; si un campo esta ausente en el fichero, omitelo del comentario en vez de estimarlo. El coste en € siempre lleva el prefijo `≈` por ser una estimacion sobre tarifas de lista, no la factura real.
 11. Antes de llamar a `atlassianUserInfo`, `getTransitionsForJiraIssue` o `bitbucketWorkspace`, consulta la cache local (§7 de la regla). Tras cualquier llamada exitosa, actualizala.
 
 ## Principios de ingenieria

@@ -2,6 +2,16 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). Versiones semanticas.
 
+## [0.3.5] — 2026-07-08
+
+### Added
+
+- **Total de tokens y coste estimado en €** en todos los reportes de metricas (comentario Jira de `/im-close`, `/im-status`, instrucciones de Fase C del agente `software-engineer`):
+  - `total = tokens.input + tokens.output` (nueva formula documentada en `agents/reference.md §Total de tokens y coste estimado`; `input` ya incluye `cache_read`+`cache_write`, no se duplican).
+  - Coste estimado en € a partir de una tabla de precios por modelo (USD/1M tokens, tarifas de lista aproximadas para `claude-4.6-sonnet-medium-thinking` y `composer-2.5`, con fallback para modelos no listados) y una tasa fija USD->EUR (0.92). Se recomienda un one-liner Python via Shell para el calculo exacto.
+  - Siempre se presenta con el prefijo `≈` y se aclara que es una estimacion sobre tarifas de lista, nunca la factura real de Cursor.
+- **`agents/reference.md`, `commands/im-close.md`, `commands/im-status.md`, `agents/software-engineer.md`, `README.md`** — actualizados para incluir el total de tokens y el coste estimado en las plantillas y reglas de reporte.
+
 ## [0.3.4] — 2026-07-08
 
 ### Changed

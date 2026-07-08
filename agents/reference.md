@@ -154,6 +154,53 @@ Fuentes de cada campo:
 
 **IMPORTANTE:** los tokens del turno que ESCRIBE el comentario Jira todavia no estan en el fichero cuando se escribe (el hook `stop` de ese turno se dispara despues). El comentario refleja los tokens de los turnos previos; es una cota inferior aceptable.
 
+### Total de tokens y coste estimado
+
+Estos dos valores NO los calcula ningun hook: se derivan del bloque `tokens` en el momento de reportar (Fase C, `/im-status`, `/im-close`).
+
+**Total de tokens:**
+
+```
+total = tokens.input + tokens.output
+```
+
+`tokens.input` ya incluye `cache_read` + `cache_write` + tokens frescos (ver comentario en `hooks/task-metrics-stop.sh`), por lo que sumar `output` es suficiente para el total real procesado en la tarea. No sumes `cache_read`/`cache_write` aparte o contarias esos tokens dos veces.
+
+**Coste estimado (€):**
+
+```
+fresh_input = max(tokens.input - tokens.cache_read - tokens.cache_write, 0)
+coste_usd   = (fresh_input * precio_input
+             + tokens.cache_read  * precio_cache_read
+             + tokens.cache_write * precio_cache_write
+             + tokens.output      * precio_output) / 1_000_000
+coste_eur   = coste_usd * TASA_USD_EUR
+```
+
+Tabla de precios (USD por 1M tokens, tarifas de lista aproximadas — revisar periodicamente):
+
+| Modelo | Input fresco | Cache read | Cache write | Output |
+|---|---|---|---|---|
+| `claude-4.6-sonnet-medium-thinking` | 3.00 | 0.30 | 3.75 | 15.00 |
+| `composer-2.5` | 0.30 | 0.03 | 0.375 | 1.50 |
+| Otro modelo no listado | 3.00 | 0.30 | 3.75 | 15.00 (usar tarifa de Sonnet como aproximacion conservadora) |
+
+`TASA_USD_EUR` = 0.92 (aproximada, sin actualizacion automatica — usar solo como referencia, no como cifra de facturacion real).
+
+Usa `last_model` del fichero de metricas para elegir la fila de la tabla. Para el calculo, es mas fiable usar un one-liner Python via Shell que hacer la aritmetica mentalmente, por ejemplo:
+
+```bash
+python3 -c "
+tokens = {'input': 1947096, 'output': 10348, 'cache_read': 1506478, 'cache_write': 440604}
+precio = {'input': 3.00, 'cache_read': 0.30, 'cache_write': 3.75, 'output': 15.00}
+fresh = max(tokens['input'] - tokens['cache_read'] - tokens['cache_write'], 0)
+usd = (fresh*precio['input'] + tokens['cache_read']*precio['cache_read'] + tokens['cache_write']*precio['cache_write'] + tokens['output']*precio['output']) / 1_000_000
+print(f'total={tokens[\"input\"]+tokens[\"output\"]}  usd={usd:.2f}  eur={usd*0.92:.2f}')
+"
+```
+
+**Nunca presentar el coste como cifra exacta de facturacion.** Es una estimacion basada en tarifas de lista publicas y una tasa de cambio fija; la facturacion real de Cursor puede diferir (planes, descuentos, tokens incluidos en suscripcion, etc.). Formatea siempre con el prefijo `≈` y aclara "estimado".
+
 ### `.intermarkit/task-metrics/.active`
 
 Pointer al fichero de la tarea activa (path relativo o absoluto). Lo escribe el agente al iniciar (Fase A) y lo borra al cerrar (Fase C `/im-close`). Optimiza los hooks a O(1). El hook `sessionEnd` NO borra este pointer — una tarea Jira puede sobrevivir al cierre de un chat y continuar en otra conversacion.
@@ -214,16 +261,19 @@ Ejemplos:
 - **Verificacion:** OpenSpec verify + revision adversarial APROBADA
 - **Tiempo dedicado:** X min
 - **Tool calls:** N
-- **Tokens:** input 1.9M · output 10K · cache hit 77% · turns 3
+- **Tokens:** input 1.9M · output 10K · total 1.96M · cache hit 77% · turns 3
+- **Coste estimado:** ≈ 5,23 € (tarifas de lista, ver `reference.md §Total de tokens y coste estimado`)
 - **Context peak:** 120K tokens (85% del window)  ← opcional, solo si hay `context_peak`
 ```
 
 Reglas de formato:
 
 - **Tokens:** usa el bloque `tokens` del fichero de metricas. Formatea con `M`/`K` para legibilidad (`1_947_096` -> `1.9M`, `10_348` -> `10K`). `cache hit %` = `cache_read / input * 100` redondeado a entero.
+- **Total:** `tokens.input + tokens.output` (ver formula en §Total de tokens y coste estimado). No sumar `cache_read`/`cache_write` aparte, ya estan incluidos en `input`.
+- **Coste estimado:** calcula con la tabla de precios y la formula de §Total de tokens y coste estimado, usando `last_model` para elegir la tarifa. Formatea en euros con coma decimal y 2 decimales, siempre con el prefijo `≈` (p.ej. `≈ 5,23 €`) porque es una estimacion, no la factura real.
 - **Context peak:** solo incluir la linea si `context_peak` existe en el fichero (indica que hubo al menos una compactacion). Formato: `<tokens> (<percent>% del window)`.
 - **Tokens del turno actual:** no estan contabilizados (el hook `stop` se dispara despues del comentario). La cifra es una cota inferior aceptable — indicalo en el commit o en la documentacion si es relevante, pero no en el comentario Jira estandar.
-- **Nunca inventar cifras:** si el bloque `tokens` no existe o `tokens.turns` es 0, omite las lineas de tokens y context_peak.
+- **Nunca inventar cifras:** si el bloque `tokens` no existe o `tokens.turns` es 0, omite las lineas de tokens, total, coste y context_peak.
 
 ## Flujo de estados Jira
 
