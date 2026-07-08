@@ -19,7 +19,7 @@ No repitas el anuncio en cada mensaje del chat, solo al principio.
 
 ### 0.1 Una tarea Jira por conversacion
 
-Cuando una tarea se cierra (Fase C completada), si el usuario quiere trabajar en OTRA tarea Jira distinta, pide que abra un chat nuevo en lugar de continuar en este. Excepcion: peticiones puntuales sobre la MISMA tarea (revisar el PR, ajustar el comentario) continuan en el mismo chat.
+Cuando una tarea se cierra (Fase D completada con `/im-done`), si el usuario quiere trabajar en OTRA tarea Jira distinta, pide que abra un chat nuevo en lugar de continuar en este. Excepcion: peticiones puntuales sobre la MISMA tarea (revisar el PR, ajustar un fix de Fase D, cerrar con `/im-done`) continuan en el mismo chat.
 
 ## 1. Ambito: solo el proyecto configurado
 
@@ -108,12 +108,14 @@ Si `mcp_caches.bitbucket_verified == "fresh"`, salta la verificacion (usa la cac
 4. `/opsx-verify` tras `/opsx-apply`.
 5. Subagente `adversarial-reviewer` obligatorio tras `verify`, antes de `archive`.
 6. Si hay hallazgos criticos, corrige y repite verify + adversarial hasta veredicto `APROBADO`.
-7. `/opsx-archive` solo tras `APROBADO`.
+7. `/opsx-archive` solo tras `APROBADO`. Esto cierra el ciclo tecnico de validacion de codigo.
+8. La validacion funcional/manual por el usuario ocurre en **Fase D** (§6.3), DESPUES del archive y la Fase C.
 
 **Excepciones (no requieren workflow completo ni revision adversarial):**
 - Fixes triviales de typos o formatting
 - Actualizaciones de dependencias menores
 - Cambios exclusivos en documentacion
+- Fixes menores encontrados durante validacion humana (Fase D) — ver §6.3
 
 ## 4. Modelo
 
@@ -139,13 +141,24 @@ Si `mcp_caches.bitbucket_verified == "fresh"`, salta la verificacion (usa la cac
 ### 6.2 Commits convencionales
 `PROJ-XXX:tipo: descripcion breve` (sin espacio antes del primer `:`; tipo: feat / fix / refactor / test / docs / chore). Ej: `PROJ-42:feat: add JWT authentication`.
 
-### 6.3 Workflow completo (Fases A, B, C)
+### 6.3 Workflow completo (Fases A, B, C, D)
 
 Detalle paso a paso en el agente `software-engineer` (§Paso 3). Resumen:
 
 - **Fase A — Preparar entorno:** si multi-repo, pregunta que repo(s) afectan a la tarea (§2.3bis); checkout desde `default_branch`, crear rama en cada repo seleccionado, transicionar Jira a "In Progress" (via `getTransitionsForJiraIssue` + `transitionJiraIssue`, usando cache de transiciones — §7), inicializar `.intermarkit/task-metrics/{PROJ-XXX}.json` (incluye `repos` si es multi-repo) y escribir el pointer `.active`.
 - **Fase B — Implementar:** ciclo OpenSpec (propose -> review -> apply -> verify -> adversarial -> archive).
-- **Fase C — Cierre:** actualizar docs si aplica, commit final + push en cada repo tocado, crear un PR por repo (`bitbucketPullRequest` create), marcar criterios de aceptacion cumplidos en la descripcion Jira (`- [ ]` -> `- [x]`), transicionar a "In Testing", calcular metricas (tiempo por timestamp + `tool_calls` del fichero), anadir comentario Jira (con los PRs de todos los repos), borrar el pointer `.active`, sugerir chat nuevo para la siguiente tarea.
+- **Fase C — Cierre tecnico:** actualizar docs si aplica, commit final + push en cada repo tocado, crear un PR por repo (`bitbucketPullRequest` create), marcar criterios de aceptacion cumplidos en la descripcion Jira (`- [ ]` -> `- [x]`), transicionar a "In Testing", calcular metricas (tiempo por timestamp + `tool_calls` del fichero), anadir comentario Jira (con los PRs de todos los repos), borrar el pointer `.active`, informar al usuario de que la tarea queda pendiente de su validacion manual.
+- **Fase D — Validacion humana:** tras Fase C, la tarea permanece en "In Testing" hasta que el usuario valide manualmente el feature. El flujo:
+  1. El usuario prueba la app/feature manualmente.
+  2. Si encuentra bugs, los reporta al agente (mismo chat o chat nuevo sobre la MISMA tarea).
+  3. El agente corrige segun severidad:
+     - **Fix menor** (visual, texto, padding, ajuste cosmético): commit directo + push. No requiere ciclo OpenSpec ni adversarial (aplica excepcion §3).
+     - **Fix significativo** (logica rota, flujo incompleto, fallo funcional): mini-ciclo `apply -> verify -> adversarial` reutilizando la propuesta original, luego commit + push.
+  4. El push actualiza el PR automaticamente (misma rama).
+  5. El usuario vuelve a probar.
+  6. Cuando el usuario confirma que todo funciona, ejecuta `/im-done` para transicionar Jira a "Done".
+
+**Importante:** la transicion "In Testing" -> "Done" NUNCA es automatica. Requiere confirmacion explicita del usuario via `/im-done`.
 
 ### 6.4 Herramientas MCP Bitbucket
 
@@ -213,7 +226,8 @@ Regla practica para el comentario Jira: incluir tiempo (por timestamp), tool_cal
 ## 9. Comandos propios del plugin
 
 - `/im-take {ISSUE_KEY}` — ejecuta Fase A completa.
-- `/im-close` — ejecuta Fase C completa.
+- `/im-close` — ejecuta Fase C completa (cierre tecnico: commit, push, PR, Jira "In Testing", comentario).
+- `/im-done` — ejecuta Fase D final: transiciona Jira de "In Testing" a "Done", anade comentario de validacion completada. Solo ejecutar cuando el usuario confirma que sus pruebas manuales son satisfactorias.
 - `/im-status` — resumen del estado (tarea activa, rama, tiempo, tool calls, tokens, context peak).
 
 Los comandos son atajos que expanden pasos concretos del workflow. El agente sigue las mismas reglas.

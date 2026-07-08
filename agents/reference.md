@@ -295,6 +295,35 @@ Reglas de formato:
 
 ```
 To Do --> In Progress --> In Testing --> Done
+         (Fase A)        (Fase C)       (Fase D: /im-done)
 ```
 
+| Transicion | Quien la dispara | Cuando |
+|---|---|---|
+| To Do -> In Progress | Agente (Fase A / `/im-take`) | Al empezar a trabajar en la tarea |
+| In Progress -> In Testing | Agente (Fase C / `/im-close`) | Codigo listo, PR creado, pendiente validacion humana |
+| In Testing -> Done | Agente (Fase D / `/im-done`) | Usuario confirma que sus pruebas manuales son satisfactorias |
+
+**Importante:** la transicion "In Testing" -> "Done" NUNCA es automatica. Requiere que el usuario ejecute `/im-done` tras validar manualmente el feature.
+
 Transiciones por nombre via `getTransitionsForJiraIssue` (los IDs varian entre proyectos). Cachear el mapa por proyecto en `.intermarkit/cache/jira-transitions-{PROJECT}.json` (TTL 7d).
+
+## Plantilla de comentario Jira — `/im-done` (Fase D)
+
+`addCommentToJiraIssue` con `contentFormat: "markdown"`:
+
+```
+**Validacion manual completada** (via IntermarkIt Dev Plugin)
+
+- **Validado por:** usuario (pruebas manuales)
+- **Iteraciones de fix:** N (o "ninguna" si no hubo fixes post-PR)
+- **Estado:** feature validado y funcionando correctamente
+```
+
+Si hubo fixes durante Fase D, anadir detalle:
+
+```
+- **Fixes aplicados durante testing:**
+  - `{hash-corto}` — descripcion breve del fix 1
+  - `{hash-corto}` — descripcion breve del fix 2
+```
