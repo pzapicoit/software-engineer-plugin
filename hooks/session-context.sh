@@ -7,11 +7,17 @@
 #   - Parsing YAML con python3 (yaml.safe_load si esta disponible, fallback minimo si no).
 #   - Todo el output se serializa con json.dumps para evitar escaping fragil.
 #   - Fail-open: cualquier error -> mensaje minimo, exit 0.
+#
+# IMPORTANTE: el hook sessionStart se ejecuta con cwd = raiz de instalacion del plugin,
+# NO la raiz del proyecto. Todas las rutas se construyen a partir de $CURSOR_PROJECT_DIR
+# (variable de entorno oficial, siempre presente) en lugar de depender del cwd.
+# Ver: https://forum.cursor.com/t/153236
 
-CONFIG_FILE=".intermarkit/config.yaml"
+PROJECT_DIR="${CURSOR_PROJECT_DIR:-.}"
+CONFIG_FILE="$PROJECT_DIR/.intermarkit/config.yaml"
 
-# Rama Git actual (se calcula fuera de Python para simplicidad y para no depender del cwd de python).
-current_branch=$(git branch --show-current 2>/dev/null || echo "")
+# Rama Git actual (se indica explicitamente el repo con -C para no depender del cwd).
+current_branch=$(git -C "$PROJECT_DIR" branch --show-current 2>/dev/null || echo "")
 
 if ! command -v python3 > /dev/null 2>&1; then
   # Fallback ultra minimo si no hay python3.
@@ -23,7 +29,7 @@ if ! command -v python3 > /dev/null 2>&1; then
   exit 0
 fi
 
-python3 - "$CONFIG_FILE" "$current_branch" <<'PYEOF'
+python3 - "$CONFIG_FILE" "$current_branch" "$PROJECT_DIR" <<'PYEOF'
 from __future__ import annotations
 
 import json
@@ -33,6 +39,7 @@ from pathlib import Path
 
 config_path = sys.argv[1]
 current_branch = sys.argv[2] or "N/A"
+project_dir = Path(sys.argv[3])
 
 
 def load_yaml(path: str) -> dict | None:
@@ -169,17 +176,17 @@ def find_active_task(metrics_dir: Path) -> dict | None:
 
 config = load_yaml(config_path)
 home = Path(os.path.expanduser("~"))
-cache_dir = Path(".intermarkit") / "cache"
-metrics_dir = Path(".intermarkit") / "task-metrics"
+cache_dir = project_dir / ".intermarkit" / "cache"
+metrics_dir = project_dir / ".intermarkit" / "task-metrics"
 
 payload: dict = {
     "current_branch": current_branch,
     "config_exists": config is not None,
     "credentials_global_exists": (home / ".intermarkit" / "credentials.yaml").is_file(),
     "architecture_docs_exists": (
-        Path(".intermarkit") / "architecture.md"
-    ).is_file() and (Path(".intermarkit") / "functional.md").is_file(),
-    "openspec_initialized": Path("openspec").is_dir(),
+        project_dir / ".intermarkit" / "architecture.md"
+    ).is_file() and (project_dir / ".intermarkit" / "functional.md").is_file(),
+    "openspec_initialized": (project_dir / "openspec").is_dir(),
     "active_task": find_active_task(metrics_dir),
     "mcp_caches": {
         "user_info": cache_state(cache_dir, "atlassian-user.json"),

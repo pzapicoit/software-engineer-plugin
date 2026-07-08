@@ -24,8 +24,14 @@
 #   workspace_roots / user_email / transcript_path
 #
 # Fail-open: log de errores en .intermarkit/task-metrics/.hooks.log, exit 0 siempre.
+#
+# IMPORTANTE: los hooks de plugin NO comparten todos el mismo cwd. El hook "stop" se
+# ejecuta con cwd = raiz del proyecto, pero el resto (postToolUse, preCompact, sessionEnd,
+# sessionStart) se ejecuta con cwd = raiz de instalacion del plugin. Por eso las rutas se
+# construyen siempre a partir de $CURSOR_PROJECT_DIR (variable de entorno oficial, siempre
+# presente) en lugar de depender del cwd. Ver: https://forum.cursor.com/t/153236
 
-METRICS_DIR=".intermarkit/task-metrics"
+METRICS_DIR="${CURSOR_PROJECT_DIR:-.}/.intermarkit/task-metrics"
 
 if [ ! -d "$METRICS_DIR" ]; then
   exit 0

@@ -2,19 +2,19 @@
   "version": 1,
   "hooks": {
     "sessionStart": [
-      { "command": "hooks/session-context.sh" }
+      { "command": "${CURSOR_PLUGIN_ROOT}/hooks/session-context.sh" }
     ],
     "postToolUse": [
-      { "command": "hooks/task-metrics-tooluse.sh" }
+      { "command": "${CURSOR_PLUGIN_ROOT}/hooks/task-metrics-tooluse.sh" }
     ],
     "stop": [
-      { "command": "hooks/task-metrics-stop.sh" }
+      { "command": "${CURSOR_PLUGIN_ROOT}/hooks/task-metrics-stop.sh" }
     ],
     "sessionEnd": [
-      { "command": "hooks/task-metrics-session-end.sh" }
+      { "command": "${CURSOR_PLUGIN_ROOT}/hooks/task-metrics-session-end.sh" }
     ],
     "preCompact": [
-      { "command": "hooks/task-metrics-compact.sh" }
+      { "command": "${CURSOR_PLUGIN_ROOT}/hooks/task-metrics-compact.sh" }
     ]
   }
 }

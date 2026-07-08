@@ -21,8 +21,13 @@
 # agente ejecuta la Fase C (/im-close) o el usuario lo hace manualmente.
 #
 # Fail-open: log en .intermarkit/task-metrics/.hooks.log, exit 0 siempre.
+#
+# IMPORTANTE: este hook (sessionEnd) se ejecuta con cwd = raiz de instalacion del plugin,
+# NO la raiz del proyecto. Por eso la ruta se construye a partir de $CURSOR_PROJECT_DIR
+# (variable de entorno oficial, siempre presente) en lugar de depender del cwd.
+# Ver: https://forum.cursor.com/t/153236
 
-METRICS_DIR=".intermarkit/task-metrics"
+METRICS_DIR="${CURSOR_PROJECT_DIR:-.}/.intermarkit/task-metrics"
 
 if [ ! -d "$METRICS_DIR" ]; then
   exit 0

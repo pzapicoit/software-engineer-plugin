@@ -43,19 +43,29 @@ done
 echo ""
 echo "== Rutas de comandos en hooks/hooks.json =="
 if [ -f "hooks/hooks.json" ]; then
-  # Los "command" de hooks/hooks.json se resuelven relativos a la raiz del
-  # plugin (no relativos a hooks/hooks.json). Ver docs oficiales:
-  # https://cursor.com/docs/reference/plugins.md#hooks-format
+  # Los "command" deben usar el prefijo ${CURSOR_PLUGIN_ROOT}/ porque el cwd de los
+  # hooks de plugin varia segun el evento (el hook "stop" corre con cwd = raiz del
+  # proyecto, el resto con cwd = raiz de instalacion del plugin). Ver:
+  # https://forum.cursor.com/t/153236
   while IFS= read -r cmd_path; do
     [ -z "$cmd_path" ] && continue
-    if [ -f "$cmd_path" ]; then
-      if [ -x "$cmd_path" ]; then
+    case "$cmd_path" in
+      '${CURSOR_PLUGIN_ROOT}/'*)
+        rel_path="${cmd_path#\$\{CURSOR_PLUGIN_ROOT\}/}"
+        ;;
+      *)
+        check "hooks/hooks.json -> $cmd_path" 1 "debe empezar por \${CURSOR_PLUGIN_ROOT}/ (el cwd de los hooks de plugin no es fiable)"
+        continue
+        ;;
+    esac
+    if [ -f "$rel_path" ]; then
+      if [ -x "$rel_path" ]; then
         check "hooks/hooks.json -> $cmd_path" 0
       else
         check "hooks/hooks.json -> $cmd_path" 1 "no ejecutable (chmod +x)"
       fi
     else
-      check "hooks/hooks.json -> $cmd_path" 1 "no existe relativo a la raiz del plugin"
+      check "hooks/hooks.json -> $cmd_path" 1 "no existe relativo a la raiz del plugin ($rel_path)"
     fi
   done < <(python3 -c "
 import json

@@ -2,6 +2,18 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). Versiones semanticas.
 
+## [0.3.3] — 2026-07-08
+
+### Fixed
+
+- **Bug critico: el hook `stop` fallaba con exit code 127 (`no such file or directory: hooks/task-metrics-stop.sh`).** La correccion de v0.3.2 asumia que todos los hooks de plugin comparten el mismo cwd (raiz del plugin), pero no es cierto: segun confirma el equipo de Cursor ([foro](https://forum.cursor.com/t/inconsistent-working-directory-for-plugin-hook-commands/153236), [foro 2](https://forum.cursor.com/t/stop-hook-uses-wrong-or-different-working-directory-when-executing/157195)), el hook `stop` se ejecuta con cwd = **raiz del proyecto** (para compatibilidad con plugins de Claude Code que esperan encontrar `.claude/`), mientras que el resto de hooks de plugin (`sessionStart`, `postToolUse`, `preCompact`, `sessionEnd`) se ejecutan con cwd = **raiz de instalacion del plugin**. La ruta relativa `hooks/task-metrics-stop.sh` solo se resolvia bien para estos ultimos, nunca para `stop`. Corregido usando `${CURSOR_PLUGIN_ROOT}` (variable de entorno documentada por Cursor para plugins) en el `command` de los 5 hooks en `hooks/hooks.json`, que resuelve siempre a la raiz de instalacion del plugin independientemente del cwd real del proceso.
+- **Bug critico silencioso: `session-context.sh`, `task-metrics-tooluse.sh`, `task-metrics-compact.sh` y `task-metrics-session-end.sh` probablemente nunca leian/escribian el fichero correcto.** Estos 4 hooks corren con cwd = raiz del plugin (ver punto anterior), pero construian rutas como `.intermarkit/task-metrics` o `.intermarkit/config.yaml` de forma relativa al cwd — es decir, relativas a la instalacion del plugin, no al proyecto del usuario. Como el directorio no existe ahi, los scripts hacian `exit 0` sin error visible (fail-open), por lo que el contexto de `sessionStart` y las metricas de `tool_calls`/`context_peak`/`finished_at` podian no registrarse nunca sin que se notara. Corregido: todas las rutas se construyen ahora a partir de `$CURSOR_PROJECT_DIR` (variable de entorno oficial de Cursor, siempre presente), no del cwd. `git branch --show-current` en `session-context.sh` ahora usa `git -C "$CURSOR_PROJECT_DIR"` por el mismo motivo. El hook `stop` (que si tenia cwd correcto) tambien se actualizo por consistencia y para blindarlo ante futuros cambios de Cursor en este comportamiento.
+- **`scripts/lint.sh`** — el check de rutas de `hooks/hooks.json` ahora exige el prefijo `${CURSOR_PLUGIN_ROOT}/` en cada `command` en lugar de validar rutas relativas puras, para detectar una regresion de este tipo antes de publicar.
+
+### Changed
+
+- **`.cursor-plugin/plugin.json`** — bump a `0.3.3`, `description` actualizada.
+
 ## [0.3.2] — 2026-07-08
 
 ### Fixed
