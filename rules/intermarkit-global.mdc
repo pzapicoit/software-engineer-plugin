@@ -137,7 +137,7 @@ Si `mcp_caches.bitbucket_verified == "fresh"`, salta la verificacion (usa la cac
 **Multi-repo:** se usa el MISMO nombre de rama en cada repo seleccionado para la tarea (ver §2.3bis). No se varia el nombre entre repos aunque los commits/PRs sean independientes.
 
 ### 6.2 Commits convencionales
-`tipo(PROJ-XXX): descripcion breve` (feat / fix / refactor / test / docs / chore).
+`PROJ-XXX:tipo: descripcion breve` (sin espacio antes del primer `:`; tipo: feat / fix / refactor / test / docs / chore). Ej: `PROJ-42:feat: add JWT authentication`.
 
 ### 6.3 Workflow completo (Fases A, B, C)
 

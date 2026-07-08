@@ -223,14 +223,14 @@ Log de fallos de hooks (fail-open + rastro). Rotacion simple si supera 100 KB.
 `{slug}`: 2-4 palabras del titulo en kebab-case.
 
 ### Commits
-Formato: `tipo(PROJ-XXX): descripcion breve` (imperativo, minusculas).
+Formato: `PROJ-XXX:tipo: descripcion breve` (sin espacio antes del primer `:`, imperativo, minusculas).
 
 Tipos: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`, `style`, `perf`.
 
 Ejemplos:
-- `feat(PROJ-42): add JWT authentication`
-- `fix(PROJ-42): handle expired token edge case`
-- `refactor(PROJ-42): extract token validation to service`
+- `PROJ-42:feat: add JWT authentication`
+- `PROJ-42:fix: handle expired token edge case`
+- `PROJ-42:refactor: extract token validation to service`
 
 ### PRs
 

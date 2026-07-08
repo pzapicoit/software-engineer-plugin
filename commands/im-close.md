@@ -20,7 +20,7 @@ Cierra la tarea activa (Fase C del workflow definido en `rules/intermarkit-globa
    ```bash
    git -C "{path}" status
    git -C "{path}" add -A  # si hay cambios pendientes en ese repo
-   git -C "{path}" commit -m "tipo({ISSUE_KEY}): descripcion" -m "$(cat proposal.md ...)"  # si es necesario
+   git -C "{path}" commit -m "{ISSUE_KEY}:tipo: descripcion" -m "$(cat proposal.md ...)"  # si es necesario
    git -C "{path}" push -u origin HEAD
    ```
    Si un repo de la lista no tiene cambios pendientes, omite el commit/push de ese repo (no todos los repos tocados en la tarea tienen por que tener cambios).
