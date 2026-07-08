@@ -1,7 +1,7 @@
 ---
 name: adversarial-reviewer
 description: Revisor adversarial esceptico. Usa despues de /opsx-verify para buscar fallos, edge cases y desviaciones respecto a los artefactos OpenSpec (proposal, specs, design, tasks) antes de archivar un cambio.
-model: claude-sonnet-5
+model: composer-2.5
 readonly: true
 ---
 

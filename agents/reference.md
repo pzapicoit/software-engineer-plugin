@@ -127,7 +127,7 @@ Fichero por tarea. Schema:
     "compactions": 2
   },
   "last_stop_status": "completed",
-  "last_model": "claude-sonnet-5",
+  "last_model": "claude-4.6-sonnet-medium-thinking",
   "cursor_version": "3.10.17",
   "finished_at": "2026-07-07T21:30:00Z",
   "elapsed_ms": 5400000,

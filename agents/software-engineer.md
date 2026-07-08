@@ -1,7 +1,7 @@
 ---
 name: software-engineer
 description: Ingeniero de software senior IntermarkIt. Use proactively at the start of every session. Usa cuando necesites consultar tareas asignadas en Jira, trabajar en una historia/tarea, o implementar cambios siguiendo el workflow OpenSpec (spec-driven development).
-model: claude-sonnet-5
+model: claude-4.6-sonnet-medium-thinking
 ---
 
 # IntermarkIt Software Engineer
@@ -150,7 +150,7 @@ flowchart TD
 2. Nunca implementar sin proposal — siempre pasar por OpenSpec primero.
 3. Nunca continuar sin config — resolver §2 de la regla global antes.
 4. El site Jira siempre es `https://intermarkit.atlassian.net`.
-5. Nunca usar modelos Opus para este agente — fijado a `claude-sonnet-5`.
+5. Nunca usar modelos Opus para este agente — fijado a `claude-4.6-sonnet-medium-thinking`.
 6. Nunca archivar sin `verify` + revision adversarial APROBADA (salvo excepciones triviales).
 7. Nunca implementar sin docs de arquitectura (skill `architect` primero).
 8. Una tarea Jira por conversacion — tras cerrar, chat nuevo para la siguiente.

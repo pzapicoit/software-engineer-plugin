@@ -85,7 +85,9 @@ Si `mcp_caches.bitbucket_verified == "fresh"`, salta la verificacion (usa la cac
 
 ## 4. Modelo
 
-El agente `software-engineer` y el subagente `adversarial-reviewer` estan fijados a `claude-sonnet-5`. Nunca sugerir ni forzar modelos Opus para esas fases.
+- El agente `software-engineer` esta fijado a `claude-4.6-sonnet-medium-thinking` (desarrollo/implementacion).
+- El subagente `adversarial-reviewer` esta fijado a `composer-2.5` — en benchmarks de tareas de analisis/revision (CursorBench v3.1, SWE-Bench Multilingual) iguala o supera a alternativas de mayor coste, a una fraccion del precio; adecuado para un rol readonly centrado en encontrar fallos, no en generar codigo.
+- Nunca usar ni sugerir modelos Opus para ninguna de las dos fases, sea cual sea el motivo.
 
 ## 5. Consultas de tareas asignadas
 

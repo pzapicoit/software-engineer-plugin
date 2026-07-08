@@ -1,12 +1,12 @@
 # IntermarkIt Dev Plugin
 
-Plugin de Cursor para desarrolladores de IntermarkIt. Integra normas de trabajo siempre activas con workflow spec-driven (OpenSpec), gestion de tareas via Jira, Git/Bitbucket (MCP Atlassian incluido), cache MCP local para ahorrar peticiones y modelo fijado a `claude-sonnet-5`.
+Plugin de Cursor para desarrolladores de IntermarkIt. Integra normas de trabajo siempre activas con workflow spec-driven (OpenSpec), gestion de tareas via Jira, Git/Bitbucket (MCP Atlassian incluido), cache MCP local para ahorrar peticiones y modelos fijados por rol (`claude-4.6-sonnet-medium-thinking` para desarrollo, `composer-2.5` para revision adversarial).
 
 ## Que incluye
 
 - **Regla `intermarkit-global`** (`alwaysApply: true`) — fuente unica de verdad: cascada de setup, workflow OpenSpec, convenciones Git, cache MCP y comandos. Se carga en TODA conversacion sin invocar nada.
-- **Agente `software-engineer`** — fijado a `claude-sonnet-5`, sigue la regla global (no la duplica). Invocable con `/software-engineer` cuando se prefiera contexto aislado.
-- **Subagente `adversarial-reviewer`** — revision esceptica y readonly tras cada implementacion, antes de archivar.
+- **Agente `software-engineer`** — fijado a `claude-4.6-sonnet-medium-thinking`, sigue la regla global (no la duplica). Invocable con `/software-engineer` cuando se prefiera contexto aislado.
+- **Subagente `adversarial-reviewer`** — fijado a `composer-2.5`. Revision esceptica y readonly tras cada implementacion, antes de archivar.
 - **Skill `architect`** — documenta arquitectura y funcionalidad antes de implementar (brownfield o greenfield).
 - **Skill `python-development`** — buenas practicas Python (uv, ruff, mypy, pytest) y frameworks estandar (FastAPI, Django, Typer, SQLAlchemy).
 - **Comandos propios**:
@@ -167,7 +167,7 @@ software-engineer-plugin/
     "tokens": {"input": 1947096, "output": 10348, "cache_read": 1506478, "cache_write": 440604, "turns": 3},
     "context_peak": {"tokens": 120000, "percent": 85, "window_size": 128000, "compactions": 2},
     "finished_at": "...", "elapsed_ms": 5400000,
-    "last_model": "claude-sonnet-5", "cursor_version": "3.10.17"
+    "last_model": "claude-4.6-sonnet-medium-thinking", "cursor_version": "3.10.17"
   }
   ```
 - `.intermarkit/task-metrics/.active` — pointer a tarea activa (local, NO commitear).

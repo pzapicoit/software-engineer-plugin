@@ -2,6 +2,20 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). Versiones semanticas.
 
+## [0.3.4] — 2026-07-08
+
+### Changed
+
+- **Modelo del agente `software-engineer`**: `claude-sonnet-5` -> `claude-4.6-sonnet-medium-thinking`. Decision explicita del equipo para el rol de desarrollo/implementacion.
+- **Modelo del subagente `adversarial-reviewer`**: `claude-sonnet-5` -> `composer-2.5`. Elegido entre Composer y las alternativas OpenAI (GPT-5.5) comparando benchmarks publicos (Artificial Analysis Coding Agent Index, CursorBench v3.1, SWE-Bench Multilingual, mayo 2026):
+  - En el indice compuesto (que pondera mucho Terminal-Bench, tareas de shell), GPT-5.5 xhigh (65) supera a Composer 2.5 (62), pero el `adversarial-reviewer` es **readonly** y no ejecuta shell — ese benchmark no es representativo de su carga real de trabajo.
+  - En las metricas mas relevantes para un rol de analisis/revision de codigo — CursorBench v3.1 (63.2% vs 59.2% de GPT-5.5 en configuracion default) y SWE-Bench Multilingual (79.8% vs ~78-80% segun fuente, esencialmente empate) — Composer 2.5 iguala o supera a GPT-5.5.
+  - Composer 2.5 cuesta entre ~10x y ~60x menos por tarea que GPT-5.5/Opus en ese mismo indice, alineado con el criterio de coste del equipo.
+  - Sigue sin usarse Opus en ningun caso.
+- **`rules/intermarkit-global.mdc` §4** — documenta el modelo fijado por rol (ya no un unico modelo para ambos) y la razon de cada eleccion.
+- **`README.md`** y **`agents/reference.md`** — referencias a `claude-sonnet-5` actualizadas a los nuevos modelos.
+- **`.cursor-plugin/plugin.json`** — bump a `0.3.4`.
+
 ## [0.3.3] — 2026-07-08
 
 ### Fixed
