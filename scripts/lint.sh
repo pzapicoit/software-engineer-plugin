@@ -123,7 +123,7 @@ done
 
 echo ""
 echo "== Shell hooks =="
-for f in hooks/session-context.sh hooks/task-metrics-tooluse.sh hooks/task-metrics-stop.sh hooks/task-metrics-session-end.sh hooks/task-metrics-compact.sh; do
+for f in hooks/session-context.sh hooks/task-metrics-tooluse.sh hooks/task-metrics-stop.sh hooks/task-metrics-session-end.sh hooks/task-metrics-compact.sh hooks/workflow-gate.sh; do
   if [ ! -f "$f" ]; then
     check "$f" 1 "no existe"
     continue
@@ -158,13 +158,18 @@ for path in \
   "skills/architect/SKILL.md" \
   "skills/python-development/SKILL.md" \
   "commands/im-take.md" \
-  "commands/im-close.md" \
+  "commands/im-execute.md" \
+  "commands/im-fix.md" \
+  "commands/im-delta.md" \
+  "commands/im-accept.md" \
+  "commands/im-done.md" \
   "commands/im-status.md" \
   "hooks/session-context.sh" \
   "hooks/task-metrics-tooluse.sh" \
   "hooks/task-metrics-stop.sh" \
   "hooks/task-metrics-session-end.sh" \
   "hooks/task-metrics-compact.sh" \
+  "hooks/workflow-gate.sh" \
   "hooks/hooks.json" \
   "mcp.json" \
   "config-template.yaml" \

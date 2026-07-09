@@ -2,6 +2,76 @@
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). Versiones semanticas.
 
+## [1.0.0] — 2026-07-09
+
+**Breaking change.** Rediseno completo del workflow como maquina de estados Jira de 6 posiciones con ciclo formal de deltas, gate tecnico ampliado y enrutamiento por lenguaje natural. Requiere:
+
+1. Configurar el workflow Jira del proyecto con los estados `Nueva`, `Ready`, `En Progreso`, `Testing`, `Aceptacion`, `Done` (empareja por nombre con tolerancia a espacios/acentos).
+2. Actualizar `.intermarkit/architecture.md` para declarar herramientas y umbrales de tests, cobertura y quality gates (los consultan `/im-execute` y `/im-fix`).
+
+Los proyectos existentes con tareas en curso siguen funcionando: el bloque `verification` de sus ficheros de metricas no tiene los campos nuevos y el hook `workflow-gate.sh` los trata como `true` (comportamiento antiguo).
+
+### Added
+
+- **Estados Jira: workflow de 6 posiciones** — `Nueva -> Ready -> En Progreso -> Testing -> Aceptacion -> Done`. Cada estado tiene un dueno, un comando de entrada y una accion definida en `rules/intermarkit-global.mdc §6.3` y `agents/software-engineer.md`.
+- **Ciclo formal de `fix` y `delta` desde Testing:**
+  - `/im-fix` — para bugs (la spec era correcta, la implementacion no). Mini-ciclo `apply + verify + tests + coverage + quality` sin sibling OpenSpec. Mantiene Jira en `Testing`. Se registra en un nuevo array `fixes[]` del fichero de metricas.
+  - `/im-delta` — para cambios de spec (scope o funcional). Crea sibling OpenSpec `{original}-delta-{N}` con metadato `type: scope | functional`, resetea `verification` completo, transiciona Jira de `Testing` a `Ready` y reinicia el ciclo. Se registra en un nuevo array `deltas[]` del fichero de metricas.
+  - Los deltas se pueden encadenar libremente (`Testing -> Ready -> En Progreso -> Testing -> ...`). El PR acumula todos los cambios en la misma rama.
+- **Comandos nuevos:**
+  - `/im-execute` — Ready → En Progreso → Testing con `apply` + `verify` + revision adversarial + tests + cobertura + quality gates. Al terminar todos verdes, transiciona automaticamente a `Testing`.
+  - `/im-fix` — Testing loop (bug, spec correcta).
+  - `/im-delta` — Testing → Ready (nuevo sibling OpenSpec, spec cambia).
+  - `/im-accept` — Testing → Aceptacion. Reemplaza a `/im-close` (renombrado, ver Removed). Marca `local_validation_passed`, hace commit + push + PR + archive + criterios Jira + comentario con metricas.
+- **`/im-take` cambia de rol:** ya no lleva a `In Progress`. Ahora mueve Jira a `Ready`, crea rama, inicializa metricas y ejecuta `/opsx-propose` presentando la propuesta al usuario para revision.
+- **`/im-done` cambia de rol:** ya no cierra la tarea solo con la palabra del usuario. Ahora requiere confirmacion **explicita** de que el PR se ha mergeado. Ofrece verificar el estado del PR via MCP Bitbucket si el usuario tiene dudas.
+- **`/im-status` ampliado:** muestra estado Jira, gates del bloque `verification` con marca visual (✓/✗), numero de deltas archivados, numero de fixes aplicados, cambio OpenSpec activo.
+- **Gate tecnico ampliado (`hooks/workflow-gate.sh`).** El bloque `verification` del fichero de metricas anade cuatro campos nuevos que el gate exige antes de permitir `git push`:
+  - `tests_passed` — suite de tests unitarios pasa.
+  - `coverage_ok` — cobertura cumple el umbral definido en `.intermarkit/architecture.md`.
+  - `quality_ok` — linter/formatter/type-checker pasan sin errores.
+  - `local_validation_passed` — el usuario ha confirmado en `Testing` que el feature funciona en local (lo marca `/im-accept`).
+  El gate exige TODOS ellos (mas los tres antiguos: `verify_passed`, `adversarial_verdict == "APROBADO"`, `archived`) en verde, o `exempt: true` con razon.
+- **Enrutamiento por lenguaje natural** (nueva §10 en `rules/intermarkit-global.mdc`): el agente mapea frases naturales a comandos segun el estado Jira actual. Ejemplos:
+  - "vi este error" en `Testing` → `/im-fix`; en `Done` → sugerir crear tarea nueva.
+  - "falta X" / "cambia Y" en `Testing` → `/im-delta`.
+  - "funciona" / "aceptalo" en `Testing` → `/im-accept`.
+  - "el PR se mergeo" en `Aceptacion` → `/im-done`.
+  - "adelante" / "ejecuta" en `Ready` → `/im-execute`.
+  Reglas de desambigüacion: `AskQuestion` cuando la frase es ambigua, confirmacion explicita antes de acciones destructivas (`/im-accept`, `/im-done`), aviso si el estado Jira no permite la accion.
+- **Metricas ampliadas:** `openspec_change` pasa a ser una **lista** de nombres de cambios OpenSpec (original + deltas). Nuevos campos `openspec_change_active`, `deltas[]`, `fixes[]`. Compat hacia atras: si `openspec_change` es un string (fichero antiguo), se trata como lista de un elemento.
+- **Paso 0 del agente `software-engineer`**: "Interpretar la peticion" ANTES del Paso 1. Lee el estado de la tarea activa y consulta §10 de la regla global para elegir el comando adecuado o pedir confirmacion si es ambiguo.
+- **Plantillas de comentario Jira** por transicion en `agents/reference.md`: `/im-accept`, `/im-fix` (opcional), `/im-delta`, `/im-done`. La de `/im-accept` incluye lista de deltas archivados y numero de fixes.
+- **Skill `architect` — responsabilidad adicional:** documentar en `.intermarkit/architecture.md` las herramientas y umbrales de tests unitarios, cobertura y quality gates que consultan `/im-execute` y `/im-fix`. El plugin no impone herramientas — cada proyecto declara las suyas.
+
+### Changed
+
+- **Nombre de las fases:** `Fase A/B/C/D` (con "In Progress" y "In Testing" en Jira) se sustituye por los seis estados Jira actuales. `/im-take` ya no cubre "Fase A completa" sino solo la fase `Ready` (crear rama, propuesta pendiente de aprobar). La antigua "Fase D" (validacion humana con fix menor/significativo) queda formalizada en el par `/im-fix` + `/im-delta`.
+- **Momento del push:** antes ocurria en `/im-close` (equivalente a `In Progress -> In Testing`), ANTES de la validacion humana. Ahora ocurre en `/im-accept` (equivalente a `Testing -> Aceptacion`), DESPUES de la validacion humana. Nada llega a remoto sin que el desarrollador haya probado el feature en local.
+- **Momento del cierre en Jira:** antes `/im-done` cerraba la tarea a `Done` solo con "el usuario dice que funciona". Ahora requiere confirmacion explicita del merge del PR.
+- **Cache de transiciones Jira** (`.intermarkit/cache/jira-transitions-{PROJECT}.json`): pasa a mapear los seis estados nuevos. Compat hacia atras: al primer uso el agente rellena el mapa con lo que devuelva `getTransitionsForJiraIssue` y empareja por nombre con tolerancia.
+- **`agents/software-engineer.md`**: reescrito completo. Nuevo diagrama mermaid, Paso 0 de interpretacion, secciones organizadas por estado Jira (no por fase), reglas inquebrantables ampliadas (14 y 15 nuevas sobre `/im-fix` vs `/im-delta` y enrutamiento NL).
+- **`agents/reference.md`**: schema `verification` ampliado con los 4 campos nuevos, schema de metricas con `deltas[]` y `fixes[]`, plantillas de comentario por transicion, tabla de estados Jira con quien dispara cada transicion.
+- **`rules/intermarkit-global.mdc`**: §2.7 (estados Jira esperados), §3 reescrita (workflow con deltas), §3.1 (gate ampliado), §6.3 (tabla de fases por estado), §9 (tabla completa de comandos), §10 nueva (enrutamiento por lenguaje natural).
+- **`README.md`**: seccion "Workflow" reescrita con los 6 estados, ciclo de deltas, tabla de comandos actualizada, seccion "Gate tecnico" con los 7 gates.
+
+### Removed
+
+- **`/im-close`** — renombrado a `/im-accept`. Cambia de rol: no solo hace push + PR + comentario, ahora tambien marca `local_validation_passed` y archiva el cambio OpenSpec. `commands/im-close.md` eliminado.
+- **Concepto de "Fase D"** en la documentacion — sustituido por el ciclo formal `/im-fix` + `/im-delta` desde el estado `Testing`.
+
+### Migracion desde 0.6.x
+
+Tareas en curso (`.intermarkit/task-metrics/{ISSUE_KEY}.json` existente):
+
+- **Tareas ya cerradas:** ninguna accion. Los ficheros antiguos se preservan tal cual.
+- **Tareas en In Progress (formato antiguo)**: el usuario decide manualmente si:
+  - (a) Continuar con el flujo antiguo (`/im-close` no existe; usar `/im-accept` que hara el equivalente, salvo que no se exigen los nuevos gates porque el bloque `verification` no los tiene → el hook los trata como `true`).
+  - (b) Cerrar el ciclo actual manualmente y arrancar tareas nuevas con el nuevo flujo.
+- **El hook `workflow-gate.sh` sigue funcionando** con ficheros antiguos: si el campo nuevo no existe en `verification`, lo trata como `true`. Las tareas antiguas solo veran exigidos los gates que ya tenian (`verify_passed`, `adversarial_verdict`, `archived`).
+
+**`.cursor-plugin/plugin.json`** — bump `0.6.0 → 1.0.0` (breaking).
+
 ## [0.4.0] — 2026-07-08
 
 ### Added

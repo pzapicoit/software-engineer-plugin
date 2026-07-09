@@ -1,5 +1,5 @@
 ---
-description: Normas globales IntermarkIt (contexto de proyecto, Jira, arquitectura, OpenSpec, cache MCP y workflow Git) activas en toda conversacion, sin invocar ningun agente.
+description: Normas globales IntermarkIt (contexto de proyecto, Jira, arquitectura, OpenSpec, cache MCP, workflow con deltas y enrutamiento por lenguaje natural) activas en toda conversacion, sin invocar ningun agente.
 alwaysApply: true
 ---
 
@@ -19,7 +19,7 @@ No repitas el anuncio en cada mensaje del chat, solo al principio.
 
 ### 0.1 Una tarea Jira por conversacion
 
-Cuando una tarea se cierra (Fase D completada con `/im-done`), si el usuario quiere trabajar en OTRA tarea Jira distinta, pide que abra un chat nuevo en lugar de continuar en este. Excepcion: peticiones puntuales sobre la MISMA tarea (revisar el PR, ajustar un fix de Fase D, cerrar con `/im-done`) continuan en el mismo chat.
+Cuando una tarea se cierra (Done, tras `/im-done` con confirmacion de merge del PR), si el usuario quiere trabajar en OTRA tarea Jira distinta, pide que abra un chat nuevo en lugar de continuar en este. Excepciones que continuan en el mismo chat: peticiones puntuales sobre la MISMA tarea (por ejemplo revisar el PR ya abierto, aplicar un `/im-fix`, un `/im-delta`, o cerrar con `/im-done` tras merge).
 
 ## 1. Ambito: solo el proyecto configurado
 
@@ -84,7 +84,7 @@ Reglas:
 
 - `repos:` (lista) y `repo:` (singular, legacy) son mutuamente excluyentes. Si ambos existen en el fichero, `repos:` tiene prioridad y `repo:` se ignora.
 - Todas las operaciones Git sobre un repo concreto se ejecutan con `git -C "{ruta_proyecto}/{path}" ...` (o `cd` a esa subcarpeta), nunca asumiendo el cwd.
-- **Selección de repos por tarea:** al iniciar una tarea (`/im-take`, Fase A), si hay mas de un repo configurado, el agente PREGUNTA al usuario cuales de los repos configurados afectan a esa tarea concreta (una tarea puede tocar solo frontend, solo backend, o ambos). La seleccion se guarda en el fichero de metricas de la tarea (`repos: ["frontend", "backend"]`) para no volver a preguntar en Fase C.
+- **Selección de repos por tarea:** al iniciar una tarea (`/im-take`), si hay mas de un repo configurado, el agente PREGUNTA al usuario cuales de los repos configurados afectan a esa tarea concreta. La seleccion se guarda en el fichero de metricas (`repos: ["frontend", "backend"]`) para no volver a preguntar en fases posteriores.
 - **Ramas:** misma convencion de nombre de rama (§6.1) aplicada de forma independiente en cada repo seleccionado — mismo nombre de rama en todos, pero commits/push/PR independientes por repo.
 - **PRs:** un Pull Request por repo tocado, cada uno contra su propio `workspace`/`url`. Ver plantilla en `agents/reference.md`.
 - Si solo hay un repo configurado (`repo:` legacy o `repos:` con un unico elemento), el comportamiento es identico al de antes de esta funcionalidad: no se pregunta nada, todo ocurre en la raiz del proyecto.
@@ -92,13 +92,19 @@ Reglas:
 ### 2.4 Documentacion de arquitectura y funcional
 Si `architecture_docs_exists: false`, aplica la skill `architect` ANTES de implementar nada (brownfield: analiza el codigo primero; greenfield: define stack con el usuario).
 
+`.intermarkit/architecture.md` debe declarar tambien las **herramientas y umbrales** de calidad del proyecto (tests unitarios, cobertura minima, linter/formatter/type-checker). Son los que consulta la fase En Progreso (§6.3) para marcar `tests_passed`, `coverage_ok` y `quality_ok` en el gate tecnico (§3.1). El plugin no impone herramientas concretas — cada proyecto declara las suyas.
+
 ### 2.5 OpenSpec
 Si `openspec_initialized: false`, ofrece `openspec init --tools cursor`. Si `/opsx-verify` no esta disponible (perfil `core`), sugiere `openspec config profile` + `openspec update`.
 
 ### 2.6 Bitbucket (solo si algun repo configurado es de tipo `bitbucket`)
 Si `mcp_caches.bitbucket_verified == "fresh"`, salta la verificacion (usa la cache — §7). Si esta `stale`/`missing`, ejecuta `bitbucketWorkspace list` via MCP; si funciona, cachea el resultado (§7). Si falla, informa: "Las herramientas Bitbucket requieren API token auth (Admin Hub > Rovo > Rovo MCP)". Las operaciones locales de Git siguen funcionando.
 
-## 3. Workflow OpenSpec (spec-driven)
+### 2.7 Estados Jira esperados
+
+El workflow del plugin espera seis estados en Jira (ver §6.3 para el detalle): `Nueva`, `Ready`, `En Progreso`, `Testing`, `Aceptacion`, `Done`. Configurar el workflow del proyecto Jira con estos estados y sus transiciones es responsabilidad del admin del proyecto (fuera del plugin). Si alguna transicion no existe, el agente lo informa y sigue sin bloquear (transiciona a la mas cercana disponible o pide al usuario que la haga manualmente).
+
+## 3. Workflow OpenSpec con deltas (spec-driven)
 
 **Todo cambio significativo pasa por OpenSpec:**
 
@@ -108,20 +114,56 @@ Si `mcp_caches.bitbucket_verified == "fresh"`, salta la verificacion (usa la cac
 4. `/opsx-verify` tras `/opsx-apply`.
 5. Subagente `adversarial-reviewer` obligatorio tras `verify`, antes de `archive`.
 6. Si hay hallazgos criticos, corrige y repite verify + adversarial hasta veredicto `APROBADO`.
-7. `/opsx-archive` solo tras `APROBADO`. Esto cierra el ciclo tecnico de validacion de codigo.
-8. La validacion funcional/manual por el usuario ocurre en **Fase D** (§6.3), DESPUES del archive y la Fase C.
+7. **Tests unitarios, cobertura y quality gates** del proyecto (definidos en `.intermarkit/architecture.md`, §2.4) tienen que pasar. Marcan `tests_passed`, `coverage_ok` y `quality_ok` del bloque `verification` (§3.1).
+8. `/opsx-archive` solo tras `APROBADO` y con los gates de calidad en verde.
+9. Aceptacion (commit + push + PR) **solo despues** de que el usuario haya validado localmente el feature (paso a `Aceptacion`).
 
-**Excepciones (no requieren workflow completo ni revision adversarial):**
+### 3.bis Deltas y fixes desde Testing
+
+Cuando el usuario en `Testing` detecta algo que hay que cambiar, hay dos caminos segun QUE esta roto:
+
+**`/im-fix` — Bug (la spec era correcta, la implementacion no)**
+- No crea sibling OpenSpec. Reutiliza el `openspec_change` en curso.
+- Resetea los gates afectados del bloque `verification` (`verify_passed`, `tests_passed`, `coverage_ok`, `quality_ok`). `adversarial_verdict` y `archived` NO se resetean (la aprobacion de la spec sigue valida).
+- Ejecuta mini-ciclo `apply` + `verify` + tests + coverage + quality y vuelve a `Testing`.
+- Registra el fix en `fixes[]` del fichero de metricas para trazabilidad.
+- NO mueve el estado Jira. La tarea sigue en `Testing`.
+
+**`/im-delta` — Scope o cambio funcional (la spec cambia)**
+- Crea sibling OpenSpec `openspec/changes/{original}-delta-{N}/` con su propia propuesta describiendo SOLO el delta. En `proposal.md` puede llevar el metadato `type: scope | functional` para trazabilidad.
+- Actualiza el fichero de metricas: `openspec_change` como **lista** (original + deltas), `openspec_change_active` con el delta actual, `deltas[]` con historial.
+- Resetea el bloque `verification` completo (todos a `false`/`null`): la spec cambia, todo se reverifica desde cero para el delta.
+- Mueve Jira de `Testing` a `Ready`. Ciclo completo (`/opsx-propose` -> aprobacion -> `/im-execute` -> `Testing`).
+- Se pueden encadenar N deltas y N fixes.
+
+**Aceptacion final (`/im-accept`) desde original o delta:**
+- Archiva el cambio OpenSpec en curso (`openspec_change_active`).
+- Primera aceptacion de la tarea: push + crear PR + archive.
+- Aceptaciones posteriores (tras un delta hecho despues del primer push): push a la misma rama, actualiza PR automaticamente, archive del delta.
+- El comentario Jira lista todos los cambios archivados (original + deltas) y numero de fixes.
+
+**Excepciones (no requieren workflow OpenSpec completo ni revision adversarial):**
 - Fixes triviales de typos o formatting
 - Actualizaciones de dependencias menores
 - Cambios exclusivos en documentacion
-- Fixes menores encontrados durante validacion humana (Fase D) — ver §6.3
 
 ### 3.1 Gate tecnico (no depender solo de la palabra)
 
-Estos pasos NO son solo una convencion textual: el hook `workflow-gate.sh` bloquea (`permission: ask`) cualquier `git push` de la tarea activa mientras el bloque `verification` de `.intermarkit/task-metrics/{ISSUE_KEY}.json` no tenga `verify_passed`, `adversarial_verdict == "APROBADO"` y `archived` todos en `true` — salvo que `verification.exempt` sea `true` con un `exempt_reason` (para las excepciones de arriba). Ver `agents/reference.md §Gate tecnico de workflow` para el schema completo y `agents/software-engineer.md §Fase B` para en que paso exacto se escribe cada campo.
+Estos pasos NO son solo una convencion textual: el hook `workflow-gate.sh` bloquea (`permission: ask`) cualquier `git push` de la tarea activa mientras el bloque `verification` de `.intermarkit/task-metrics/{ISSUE_KEY}.json` no tenga:
 
-Si un push se bloquea, NO es un fallo del hook: es la senal de que un paso de Fase B se salto. La accion correcta es completar el paso que falta, nunca forzar el push ni marcar `exempt` sin que aplique de verdad una excepcion real.
+- `verify_passed == true`
+- `adversarial_verdict == "APROBADO"`
+- `tests_passed == true`
+- `coverage_ok == true`
+- `quality_ok == true`
+- `archived == true`
+- `local_validation_passed == true`
+
+...salvo que `verification.exempt == true` con un `exempt_reason`. Ver `agents/reference.md §Gate tecnico de workflow` para el schema completo y `agents/software-engineer.md` para en que paso exacto se escribe cada campo.
+
+`local_validation_passed = true` lo marca `/im-accept` cuando el usuario confirma en `Testing` que el feature funciona en local. Es la senal de que el push esta autorizado.
+
+Si un push se bloquea, NO es un fallo del hook: es la senal de que un paso del workflow se salto. La accion correcta es completar el paso que falta, nunca forzar el push ni marcar `exempt` sin que aplique de verdad una excepcion real.
 
 ## 4. Modelo
 
@@ -147,24 +189,20 @@ Si un push se bloquea, NO es un fallo del hook: es la senal de que un paso de Fa
 ### 6.2 Commits convencionales
 `PROJ-XXX:tipo: descripcion breve` (sin espacio antes del primer `:`; tipo: feat / fix / refactor / test / docs / chore). Ej: `PROJ-42:feat: add JWT authentication`.
 
-### 6.3 Workflow completo (Fases A, B, C, D)
+### 6.3 Workflow completo por estado Jira
 
-Detalle paso a paso en el agente `software-engineer` (§Paso 3). Resumen:
+Detalle paso a paso en el agente `software-engineer` (§Fases). Aqui el resumen por estado:
 
-- **Fase A — Preparar entorno:** si multi-repo, pregunta que repo(s) afectan a la tarea (§2.3bis); checkout desde `default_branch`, crear rama en cada repo seleccionado, transicionar Jira a "In Progress" (via `getTransitionsForJiraIssue` + `transitionJiraIssue`, usando cache de transiciones — §7), inicializar `.intermarkit/task-metrics/{PROJ-XXX}.json` (incluye `repos` si es multi-repo) y escribir el pointer `.active`.
-- **Fase B — Implementar:** ciclo OpenSpec (propose -> review -> apply -> verify -> adversarial -> archive).
-- **Fase C — Cierre tecnico:** actualizar docs si aplica, commit final + push en cada repo tocado, crear un PR por repo (`bitbucketPullRequest` create), marcar criterios de aceptacion cumplidos en la descripcion Jira (`- [ ]` -> `- [x]`), transicionar a "In Testing", calcular metricas (tiempo por timestamp + `tool_calls` del fichero), anadir comentario Jira (con los PRs de todos los repos), borrar el pointer `.active`, informar al usuario de que la tarea queda pendiente de su validacion manual.
-- **Fase D — Validacion humana:** tras Fase C, la tarea permanece en "In Testing" hasta que el usuario valide manualmente el feature. El flujo:
-  1. El usuario prueba la app/feature manualmente.
-  2. Si encuentra bugs, los reporta al agente (mismo chat o chat nuevo sobre la MISMA tarea).
-  3. El agente corrige segun severidad:
-     - **Fix menor** (visual, texto, padding, ajuste cosmético): commit directo + push. No requiere ciclo OpenSpec ni adversarial (aplica excepcion §3).
-     - **Fix significativo** (logica rota, flujo incompleto, fallo funcional): mini-ciclo `apply -> verify -> adversarial` reutilizando la propuesta original, luego commit + push.
-  4. El push actualiza el PR automaticamente (misma rama).
-  5. El usuario vuelve a probar.
-  6. Cuando el usuario confirma que todo funciona, ejecuta `/im-done` para transicionar Jira a "Done".
+| Estado Jira | Trigger de entrada | Que hace el agente | Trigger de salida |
+|---|---|---|---|
+| `Nueva` | Issue creado | Ninguna (reservado para el agente de refinamiento futuro, fuera del `software-engineer`) | Agente de refinamiento mueve a `Ready` (fuera de scope de esta version) |
+| `Ready` | Refinamiento OK, o `/im-take` sobre un issue en `Ready`/`Nueva` | `/im-take` mueve Jira a `Ready`, crea rama desde `default_branch`, inicializa metricas y ejecuta `/opsx-propose`. Presenta la propuesta y espera aprobacion explicita del usuario | Usuario aprueba propuesta (`/im-execute`, o frase equivalente §10) |
+| `En Progreso` | `/im-execute` | Mueve Jira a `En Progreso`. `/opsx-apply` + `/opsx-verify` + subagente `adversarial-reviewer` + tests unitarios + cobertura + quality gates (segun `.intermarkit/architecture.md`). Escribe cada campo de `verification`. Todo local, sin push | Todos los gates en verde -> mueve automaticamente a `Testing` |
+| `Testing` | Fase `En Progreso` completada | Notifica al usuario para que pruebe en local. Espera respuesta | (a) OK del usuario -> `/im-accept`; (b) bug -> `/im-fix` (stay en Testing); (c) scope/funcional -> `/im-delta` (vuelve a Ready con sibling) |
+| `Aceptacion` | `/im-accept` | Marca `local_validation_passed`. Commit final + push + PR + `/opsx-archive` + marca criterios Jira + comentario con metricas | Merge del PR + confirmacion explicita del usuario (`/im-done`) |
+| `Done` | `/im-done` tras confirmacion de merge | Comentario final Jira. Sugerir chat nuevo para la siguiente tarea | — |
 
-**Importante:** la transicion "In Testing" -> "Done" NUNCA es automatica. Requiere confirmacion explicita del usuario via `/im-done`.
+**Multi-repo:** en `/im-take` (Ready) se pregunta que repos afectan. En `/im-accept` (Aceptacion) se hace push + PR **por repo tocado**, cada uno contra su propio `workspace`/`url`. Ver `agents/reference.md §PRs`.
 
 ### 6.4 Herramientas MCP Bitbucket
 
@@ -203,8 +241,8 @@ Para ahorrar llamadas MCP repetitivas, el agente cachea localmente respuestas es
 1. Antes de llamar a `atlassianUserInfo` / `getTransitionsForJiraIssue` / `bitbucketWorkspace`, lee el fichero de cache correspondiente. Si `cached_at + ttl_seconds > now`, usa `data` directamente y NO llames al MCP.
 2. El hook `sessionStart` ya expone `mcp_caches.{user_info,bitbucket_verified,transitions.<PROJECT>} = fresh|stale|missing`. Confia en ese dato si esta disponible.
 3. Tras una llamada MCP exitosa, escribe/actualiza el fichero de cache con el nuevo `cached_at` y el `ttl_seconds` de la tabla.
-4. Para transiciones Jira: guarda un dict `{"To Do": "11", "In Progress": "21", ...}` en `data`. Es estable por proyecto/workflow.
-5. **NO cachear** la `description` de issues Jira (cambia entre sesiones; §Fase C "Marcar criterios de aceptacion" la relee siempre).
+4. Para transiciones Jira: guarda un dict `{"Ready": "11", "En Progreso": "21", "Testing": "31", "Aceptacion": "41", "Done": "51"}` en `data`. Es estable por proyecto/workflow.
+5. **NO cachear** la `description` de issues Jira (cambia entre sesiones; la Aceptacion la relee siempre para marcar criterios).
 
 ### 7.4 gitignore
 
@@ -220,7 +258,7 @@ Para ahorrar llamadas MCP repetitivas, el agente cachea localmente respuestas es
 
 El plugin registra automaticamente 4 tipos de metricas en `.intermarkit/task-metrics/{ISSUE_KEY}.json` (schema completo en `agents/reference.md` §Metricas de tarea):
 
-| Metrica | Hook | Cuando se actualiza | Fiable en Fase C? |
+| Metrica | Hook | Cuando se actualiza | Fiable en Aceptacion? |
 |---|---|---|---|
 | `tool_calls` | `postToolUse` | Cada llamada a herramienta | Si |
 | `tokens.{input,output,cache_read,cache_write,turns}` | `stop` | Al final de cada turno del agente | Si (cota inferior: falta el turno del propio comentario Jira) |
@@ -233,9 +271,45 @@ Ademas de los 4 hooks de metricas, el hook `workflow-gate.sh` (evento `beforeShe
 
 ## 9. Comandos propios del plugin
 
-- `/im-take {ISSUE_KEY}` — ejecuta Fase A completa.
-- `/im-close` — ejecuta Fase C completa (cierre tecnico: commit, push, PR, Jira "In Testing", comentario).
-- `/im-done` — ejecuta Fase D final: transiciona Jira de "In Testing" a "Done", anade comentario de validacion completada. Solo ejecutar cuando el usuario confirma que sus pruebas manuales son satisfactorias.
-- `/im-status` — resumen del estado (tarea activa, rama, tiempo, tool calls, tokens, context peak).
+| Comando | Fase / transicion | Que hace |
+|---|---|---|
+| `/im-take {ISSUE_KEY}` | (cualquier estado) -> `Ready` | Lee issue, resuelve repo(s), crea rama, mueve Jira a `Ready`, ejecuta `/opsx-propose`, presenta al usuario, inicializa metricas |
+| `/im-execute` | `Ready` -> `En Progreso` -> `Testing` | Mueve a `En Progreso`, `/opsx-apply` + verify + adversarial + tests + coverage + quality, mueve a `Testing` cuando todos los gates pasan |
+| `/im-fix` | `Testing` -> `Testing` | Bug: resetea gates afectados (`verify_passed`/`tests_passed`/`coverage_ok`/`quality_ok`), mini-ciclo, registra en `fixes[]`. NO crea sibling, NO mueve Jira |
+| `/im-delta` | `Testing` -> `Ready` (delta-N) | Scope/funcional: crea sibling OpenSpec, resetea `verification` completa, mueve Jira, invita a `/opsx-propose` sobre el delta |
+| `/im-accept` | `Testing` -> `Aceptacion` | Commit + push + PR + `/opsx-archive` + criterios + comentario. Marca `local_validation_passed = true` |
+| `/im-done` | `Aceptacion` -> `Done` | Confirmacion explicita de merge del PR + comentario final. Nunca por iniciativa propia |
+| `/im-status` | (informativo) | Muestra fase actual, delta activo si aplica, estado de cada gate del `verification` |
 
 Los comandos son atajos que expanden pasos concretos del workflow. El agente sigue las mismas reglas.
+
+## 10. Enrutamiento por lenguaje natural
+
+El usuario rara vez escribira `/im-fix`, `/im-delta`, etc. de forma explicita. El agente tiene que reconocer intenciones en lenguaje natural, contextualizar segun el estado Jira actual (leido del bloque `verification` + estado del issue via cache/MCP), y disparar el comando correcto o pedir confirmacion si hay ambiguedad.
+
+### 10.1 Tabla base de frases -> acciones
+
+| Frase tipica | Estado Jira / contexto | Accion |
+|---|---|---|
+| "trabaja en PROJ-42" / "toma esta tarea" / "empezamos con..." | (cualquiera) | Ejecuta `/im-take PROJ-42` |
+| "que tareas tengo" / "que tengo pendiente" | (cualquiera) | JQL con filtro `project` + `assignee = currentUser()` (§5) |
+| "como va" / "estado" / "en que estamos" / "resumen" | Tarea activa | Ejecuta `/im-status` |
+| "adelante" / "ejecuta" / "hazlo" / "dale" / "empieza" | `Ready` con propuesta aprobada | Ejecuta `/im-execute` |
+| "no me gusta la propuesta" / "cambia el planteamiento" / "otra vez" | `Ready` | Ajusta `proposal.md`, vuelve a `/opsx-propose` sobre el mismo cambio |
+| "vi este error" / "hay un bug" / "no funciona bien" / "no hace lo que dijimos" | `Testing` | Ejecuta `/im-fix` (bug, spec no cambia) |
+| "vi este error" | `Aceptacion` (PR abierto) | Ejecuta `/im-fix`; el push posterior actualiza el PR |
+| "vi este error" | `Done` | Sugerir crear nueva tarea Jira (no reabrir la anterior) |
+| "cambia X a Y" / "hazlo diferente" / "mejor de otra manera" / "prefiero..." | `Testing` | Ejecuta `/im-delta` con `type: functional` |
+| "falta Z" / "anade tambien..." / "y tambien que..." / "olvidamos..." | `Testing` | Ejecuta `/im-delta` con `type: scope` |
+| "funciona" / "esta ok" / "aceptalo" / "sube esto" / "todo bien" | `Testing` | Ejecuta `/im-accept` |
+| "el PR se mergeo" / "ya esta en main" / "cierralo" / "hecho" | `Aceptacion` | Ejecuta `/im-done` |
+| Preguntas de codigo Python | (cualquiera) | Aplica skill `python-development` |
+| "documenta arquitectura" / "revisa el stack" | (cualquiera) | Aplica skill `architect` |
+
+### 10.2 Reglas de desambigüacion
+
+1. **Si la frase es ambigua** (por ejemplo "esto esta raro" — ¿bug o cambio de spec?), el agente pregunta al usuario mediante `AskQuestion` con opciones concretas (`/im-fix` vs `/im-delta`), no ejecuta a ciegas.
+2. **Si la accion es destructiva o costosa** (`/im-accept` = push + PR + archive; `/im-done` = cerrar tarea en Jira), el agente resume que va a hacer y pide confirmacion explicita antes de ejecutar.
+3. **Si el estado Jira no permite la accion** (por ejemplo "hay un bug" pero la tarea esta en `Ready` antes de ejecutarse), el agente lo indica y sugiere el estado o comando correcto (por ejemplo: primero `/im-execute`).
+4. **Si no hay tarea activa** pero la frase implica trabajo sobre una historia, el agente pregunta el issue key antes de proceder.
+5. **Cross-cutting**: la skill `architect` se aplica ANTES de cualquier trabajo si `architecture_docs_exists: false` (§2.4). La skill `python-development` se aplica siempre que se escriba/revise/refactorice codigo Python.

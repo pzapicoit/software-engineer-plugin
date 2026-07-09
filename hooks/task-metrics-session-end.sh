@@ -18,7 +18,7 @@
 #
 # NO borra el pointer .active — la tarea Jira puede seguir viva aunque el chat se cierre;
 # el usuario puede continuar en otra conversacion. El pointer se limpia SOLO cuando el
-# agente ejecuta la Fase C (/im-close) o el usuario lo hace manualmente.
+# agente ejecuta /im-done o el usuario lo hace manualmente.
 #
 # Fail-open: log en .intermarkit/task-metrics/.hooks.log, exit 0 siempre.
 #

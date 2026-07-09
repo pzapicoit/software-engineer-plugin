@@ -8,7 +8,7 @@
 #   - model observado (informativo, ultimo turno)
 #
 # IMPORTANTE: este hook NO marca finished_at ni elapsed_ms. Esa semantica corresponde
-# al hook sessionEnd (fin del chat) o al agente cuando ejecuta /im-close (Fase C).
+# al hook sessionEnd (fin del chat) o al agente cuando ejecuta /im-done.
 #
 # Fields del payload real de Cursor (verificado en v3.10.17):
 #   input_tokens        - total del turno (incluye cache_read + cache_write + fresh)

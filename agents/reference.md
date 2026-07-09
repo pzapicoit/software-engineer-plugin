@@ -51,17 +51,18 @@ Formato comun de todos los ficheros bajo `.intermarkit/cache/`:
 ```json
 {
   "data": {
-    "To Do": "11",
-    "In Progress": "21",
-    "In Testing": "31",
-    "Done": "41"
+    "Ready": "11",
+    "En Progreso": "21",
+    "Testing": "31",
+    "Aceptacion": "41",
+    "Done": "51"
   },
   "cached_at": "...",
   "ttl_seconds": 604800
 }
 ```
 
-Nota: los IDs son ejemplo. Se rellenan tras la primera llamada real a `getTransitionsForJiraIssue`.
+Nota: los IDs son ejemplo. Se rellenan tras la primera llamada real a `getTransitionsForJiraIssue`. Los nombres exactos de los estados dependen de la configuracion del workflow del proyecto Jira; el agente debe emparejar por nombre (comparacion case-insensitive tolerante a espacios y acentos: `aceptacion` == `Aceptación`).
 
 ### `bitbucket-verified.json`
 ```json
@@ -114,11 +115,31 @@ Fichero por tarea. Schema:
   "issue_key": "PROJ-XXX",
   "started_at": "2026-07-07T20:00:00Z",
   "repos": ["frontend", "backend"],
-  "openspec_change": "PROJ-XXX-add-user-auth",
+  "openspec_change": ["PROJ-XXX-add-user-auth", "PROJ-XXX-add-user-auth-delta-1"],
+  "openspec_change_active": "PROJ-XXX-add-user-auth-delta-1",
+  "deltas": [
+    {
+      "name": "PROJ-XXX-add-user-auth-delta-1",
+      "type": "scope",
+      "reason": "faltaba comportamiento en movil",
+      "created_at": "2026-07-07T20:30:00Z"
+    }
+  ],
+  "fixes": [
+    {
+      "description": "arreglar redirect a /home en login OK",
+      "gates_reset": ["verify_passed", "tests_passed"],
+      "timestamp": "2026-07-07T20:20:00Z"
+    }
+  ],
   "verification": {
     "verify_passed": false,
     "adversarial_verdict": null,
+    "tests_passed": false,
+    "coverage_ok": false,
+    "quality_ok": false,
     "archived": false,
+    "local_validation_passed": false,
     "exempt": false,
     "exempt_reason": null
   },
@@ -154,10 +175,13 @@ Fuentes de cada campo:
 
 | Campo | Origen | Semantica |
 |---|---|---|
-| `issue_key`, `started_at` | Agente (Fase A) | Al iniciar la tarea |
-| `repos` | Agente (Fase A) | Lista de `name` de los repos configurados (`repos:` en `config.yaml`) que afectan a esta tarea, segun respuesta del usuario. Solo presente en proyectos multi-repo; se omite por completo en proyectos de un solo repo |
-| `openspec_change` | Agente (Fase B, tras `/opsx-propose`) | Nombre del cambio OpenSpec (`openspec/changes/<nombre>/`) asociado a esta tarea. Permite trazar la tarea Jira al cambio OpenSpec correspondiente |
-| `verification` | Agente (Fase B) | Gate tecnico de calidad — ver `§Gate tecnico de workflow (verification)` abajo. El hook `workflow-gate.sh` lo lee antes de permitir `git push` |
+| `issue_key`, `started_at` | Agente (`/im-take`) | Al iniciar la tarea |
+| `repos` | Agente (`/im-take`) | Lista de `name` de los repos configurados que afectan a esta tarea, segun respuesta del usuario. Solo presente en proyectos multi-repo; se omite en proyectos de un solo repo |
+| `openspec_change` | Agente (`/im-take` y `/im-delta`) | **Lista** de nombres de cambios OpenSpec asociados a esta tarea. El primer elemento es el cambio original; los siguientes son deltas |
+| `openspec_change_active` | Agente | Nombre del cambio OpenSpec actualmente en curso (el original o el delta mas reciente que aun no esta archivado) |
+| `deltas` | Agente (`/im-delta`) | Historial de deltas creados. Solo presente si hubo al menos uno. Cada entrada: `name`, `type` (`scope` o `functional`), `reason` y `created_at` |
+| `fixes` | Agente (`/im-fix`) | Historial de bug fixes aplicados desde `Testing`. Solo presente si hubo al menos uno. Cada entrada: `description`, `gates_reset` (lista de gates que se reiniciaron), `timestamp` |
+| `verification` | Agente | Gate tecnico de calidad — ver `§Gate tecnico de workflow` abajo. El hook `workflow-gate.sh` lo lee antes de permitir `git push` |
 | `tool_calls` | Hook `postToolUse` | Incremento por cada llamada a herramienta, en vivo |
 | `tokens.input/output/cache_read/cache_write` | Hook `stop` | Suma acumulada de todos los turnos observados. Campos reales del payload de Cursor (`input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens`, v3.10.17+) |
 | `tokens.turns` | Hook `stop` | Numero de turnos observados |
@@ -168,9 +192,11 @@ Fuentes de cada campo:
 
 **IMPORTANTE:** los tokens del turno que ESCRIBE el comentario Jira todavia no estan en el fichero cuando se escribe (el hook `stop` de ese turno se dispara despues). El comentario refleja los tokens de los turnos previos; es una cota inferior aceptable.
 
+**Compatibilidad hacia atras:** en tareas creadas antes de v1.0.0, `openspec_change` era un `string` (no una lista) y no existian `openspec_change_active`, `deltas` ni `fixes`. El agente debe tolerar ambas formas: si lee `openspec_change` como string, lo trata como lista de un elemento; si `openspec_change_active` no existe, asume que es el ultimo (o unico) valor de la lista.
+
 ### Gate tecnico de workflow (`verification`)
 
-**Problema que resuelve:** la regla §3 (workflow OpenSpec) exige `verify` + revision adversarial `APROBADO` antes de `archive`, y `archive` antes de `push`/PR. Estas normas son texto — si el agente las omite (por prisa, distraccion, o mal entendimiento), nada lo impide tecnicamente. El bloque `verification` + el hook `workflow-gate.sh` convierten esa norma textual en un **bloqueo real** sobre `git push`.
+**Problema que resuelve:** la regla §3 (workflow OpenSpec) exige `verify` + revision adversarial `APROBADO` + tests + coverage + quality + `archived` antes de `push`/PR, y ademas validacion local del usuario (`local_validation_passed`) para autorizar el push. Estas normas son texto — si el agente las omite, nada lo impide tecnicamente. El bloque `verification` + el hook `workflow-gate.sh` convierten esa norma textual en un **bloqueo real** sobre `git push`.
 
 **Schema** (dentro de `.intermarkit/task-metrics/{ISSUE_KEY}.json`):
 
@@ -179,7 +205,11 @@ Fuentes de cada campo:
   "verification": {
     "verify_passed": false,
     "adversarial_verdict": null,
+    "tests_passed": false,
+    "coverage_ok": false,
+    "quality_ok": false,
     "archived": false,
+    "local_validation_passed": false,
     "exempt": false,
     "exempt_reason": null
   }
@@ -188,26 +218,39 @@ Fuentes de cada campo:
 
 | Campo | Quien lo escribe | Cuando |
 |---|---|---|
-| `verify_passed` | Agente | `true` tras `/opsx-verify` sin errores (o verificacion manual si el perfil `core` no tiene `/opsx-verify`) |
-| `adversarial_verdict` | Agente | `"APROBADO"` tras que el subagente `adversarial-reviewer` devuelva ese veredicto. Cualquier otro valor (`null`, `"RECHAZADO CON HALLAZGOS"`, etc.) bloquea el push |
-| `archived` | Agente | `true` tras ejecutar `/opsx-archive` con exito |
-| `exempt` | Agente | `true` SOLO si el cambio cae en una excepcion de la regla §3 (typo/formatting, dependencia menor, cambio exclusivo en documentacion, fix menor de Fase D). Salta el gate por completo |
-| `exempt_reason` | Agente | Texto breve justificando el `exempt` (ej. `"fix de padding en boton, Fase D"`). Obligatorio si `exempt: true` |
+| `verify_passed` | Agente | `true` tras `/opsx-verify` sin errores. Se resetea a `false` en `/im-fix` (si el fix toca codigo verificable) y en `/im-delta` (siempre) |
+| `adversarial_verdict` | Agente | `"APROBADO"` tras que el subagente `adversarial-reviewer` devuelva ese veredicto. Cualquier otro valor (`null`, `"RECHAZADO CON HALLAZGOS"`) bloquea el push. Se resetea a `null` en `/im-delta` (siempre) pero NO en `/im-fix` (la spec no cambia, la aprobacion adversarial sigue valida) |
+| `tests_passed` | Agente (`En Progreso`) | `true` si la suite de tests unitarios del proyecto (segun `.intermarkit/architecture.md`) pasa. Se resetea en `/im-fix` y `/im-delta` |
+| `coverage_ok` | Agente (`En Progreso`) | `true` si la cobertura cumple el umbral del proyecto (segun `.intermarkit/architecture.md`). Se resetea en `/im-fix` y `/im-delta` |
+| `quality_ok` | Agente (`En Progreso`) | `true` si linter/formatter/type-checker pasan sin errores (segun `.intermarkit/architecture.md`). Se resetea en `/im-fix` y `/im-delta` |
+| `archived` | Agente | `true` tras `/opsx-archive` con exito. Se resetea a `false` en `/im-delta` (nuevo cambio requiere nuevo archive) pero NO en `/im-fix` |
+| `local_validation_passed` | Agente (`/im-accept`) | `true` cuando el usuario confirma explicitamente en `Testing` que el feature funciona en local. Es la senal de que el push esta autorizado |
+| `exempt` | Agente | `true` SOLO si el cambio cae en una excepcion de la regla §3 (typo/formatting, dependencia menor, cambio exclusivo en documentacion). Salta el gate por completo |
+| `exempt_reason` | Agente | Texto breve justificando el `exempt` (ej. `"fix de typos en README"`). Obligatorio si `exempt: true` |
 
 **Logica del gate** (`hooks/workflow-gate.sh`, evento `beforeShellExecution`, matcher sobre `git push`):
 
 1. Si no hay tarea activa (`.intermarkit/task-metrics/.active` no apunta a nada) → permite (no bloquea trabajo fuera del workflow gestionado).
 2. Si `verification.exempt == true` → permite.
-3. Si `verify_passed == true` AND `adversarial_verdict == "APROBADO"` AND `archived == true` → permite.
-4. En cualquier otro caso → `permission: "ask"` con mensaje explicando que falta, forzando aprobacion manual del usuario antes de continuar con el push.
+3. Si TODOS los siguientes son `true` → permite:
+   - `verify_passed`
+   - `adversarial_verdict == "APROBADO"`
+   - `tests_passed`
+   - `coverage_ok`
+   - `quality_ok`
+   - `archived`
+   - `local_validation_passed`
+4. En cualquier otro caso → `permission: "ask"` con mensaje listando que falta, forzando aprobacion manual del usuario antes de continuar con el push.
 
 **Fail-open deliberado:** si `python3` no esta disponible, si el directorio de metricas no existe, o si el fichero de la tarea activa es ilegible, el hook permite la accion (no rompe proyectos que no usan este plugin o tareas fuera de su gestion). El gate solo aplica cuando hay una tarea activa gestionada por `/im-take`.
 
-**Quien escribe el bloque `verification`:** el agente `software-engineer`, en los pasos correspondientes de Fase B (`agents/software-engineer.md §Fase B`). No es responsabilidad de ningun hook — los hooks no pueden verificar la CALIDAD de un `verify`/revision adversarial, solo la presencia honesta del registro.
+**Compatibilidad hacia atras:** en tareas creadas antes de v1.0.0, los campos `tests_passed`, `coverage_ok`, `quality_ok` y `local_validation_passed` NO existen. El hook los trata como `true` si estan ausentes en el fichero (comportamiento antiguo: solo exigia `verify_passed` + `adversarial_verdict` + `archived`). Para tareas nuevas creadas con `/im-take` en v1.0.0+, los cuatro campos se inicializan explicitamente a `false` — el gate los exige.
+
+**Quien escribe el bloque `verification`:** el agente `software-engineer`, en los pasos correspondientes de cada fase. No es responsabilidad de ningun hook — los hooks no pueden verificar la CALIDAD de un `verify`/revision adversarial/tests/coverage/quality, solo la presencia honesta del registro.
 
 ### Total de tokens y coste estimado
 
-Estos dos valores NO los calcula ningun hook: se derivan del bloque `tokens` en el momento de reportar (Fase C, `/im-status`, `/im-close`).
+Estos dos valores NO los calcula ningun hook: se derivan del bloque `tokens` en el momento de reportar (`/im-accept`, `/im-status`, `/im-done`).
 
 **Total de tokens:**
 
@@ -254,7 +297,9 @@ print(f'total={tokens[\"input\"]+tokens[\"output\"]}  usd={usd:.2f}  eur={usd*0.
 
 ### `.intermarkit/task-metrics/.active`
 
-Pointer al fichero de la tarea activa (path relativo o absoluto). Lo escribe el agente al iniciar (Fase A) y lo borra al cerrar (Fase C `/im-close`). Optimiza los hooks a O(1). El hook `sessionEnd` NO borra este pointer — una tarea Jira puede sobrevivir al cierre de un chat y continuar en otra conversacion.
+Pointer al fichero de la tarea activa (path relativo o absoluto). Lo escribe el agente al iniciar (`/im-take`) y lo borra al cerrar (`/im-done`, tras confirmar merge del PR). Optimiza los hooks a O(1). El hook `sessionEnd` NO borra este pointer — una tarea Jira puede sobrevivir al cierre de un chat y continuar en otra conversacion.
+
+**Ojo:** `/im-accept` NO borra el pointer. La tarea sigue "activa" durante `Aceptacion` (esperando merge del PR y confirmacion del usuario). El pointer solo se borra en `/im-done`.
 
 ### `.intermarkit/task-metrics/.hooks.log`
 
@@ -282,7 +327,7 @@ Ejemplos:
 ### PRs
 
 - **Titulo:** el commit message principal (formato convencional).
-- **Descripcion:** resumen extraido de `proposal.md`:
+- **Descripcion:** resumen extraido de `proposal.md` (del cambio original — los deltas aportan bloques adicionales al final):
   ```
   ## Que
   <1-2 lineas>
@@ -296,27 +341,42 @@ Ejemplos:
 
   ## Verificacion
   OpenSpec verify + revision adversarial: APROBADO
+  Tests + coverage + quality: OK
+  Validacion local del desarrollador: OK
+
+  ## Deltas aplicados
+  - `{original}-delta-1` (scope) — <razon>
+  - `{original}-delta-2` (functional) — <razon>
+
+  ## Fixes aplicados durante Testing
+  - <descripcion 1>
+  - <descripcion 2>
   ```
+
+Omite las secciones "Deltas aplicados" y "Fixes aplicados durante Testing" si estan vacias.
 
 **Multi-repo:** un PR independiente por cada repo que recibio push (mismo titulo/formato convencional en todos, misma rama por convencion §6.1 de la regla global). La descripcion de cada PR puede acotarse a los cambios de ESE repo si el resumen de `proposal.md` distingue por componente; si no distingue, se puede reutilizar el mismo resumen en los PRs de los repos afectados.
 
-## Plantilla de comentario Jira (cierre de tarea)
+## Plantilla de comentario Jira — `/im-accept` (Aceptacion)
 
 `addCommentToJiraIssue` con `contentFormat: "markdown"`:
 
 ```
-**Implementacion completada** (via IntermarkIt Dev Plugin)
+**Implementacion aceptada localmente** (via IntermarkIt Dev Plugin)
 
 - **Rama:** `feature/PROJ-XXX-slug`
 - **PR:** [enlace al PR, o "pendiente de crear manualmente"]
 - **Cambios:** [resumen de 2-3 lineas de proposal.md]
+- **Cambios OpenSpec archivados:** original + N deltas (`PROJ-XXX-add-user-auth-delta-1`, ...)
+- **Fixes aplicados durante Testing:** M
 - **Criterios de aceptacion:** N de M marcados como cumplidos (o "sin checklist")
-- **Verificacion:** OpenSpec verify + revision adversarial APROBADA
+- **Verificacion:** OpenSpec verify + revision adversarial APROBADA + tests + coverage + quality OK + validacion local OK
 - **Tiempo dedicado:** X min
 - **Tool calls:** N
 - **Tokens:** input 1.9M · output 10K · total 1.96M · cache hit 77% · turns 3
 - **Coste estimado:** ≈ 5,23 € (tarifas de lista, ver `reference.md §Total de tokens y coste estimado`)
 - **Context peak:** 120K tokens (85% del window)  ← opcional, solo si hay `context_peak`
+- **Estado Jira:** en Aceptacion, esperando merge del PR
 ```
 
 **Variante multi-repo** — si el fichero de metricas trae `repos` con mas de un elemento, sustituye la linea `**Rama:**`/`**PR:**` por un bloque con una entrada por repo:
@@ -334,43 +394,78 @@ Reglas de formato:
 - **Total:** `tokens.input + tokens.output` (ver formula en §Total de tokens y coste estimado). No sumar `cache_read`/`cache_write` aparte, ya estan incluidos en `input`.
 - **Coste estimado:** calcula con la tabla de precios y la formula de §Total de tokens y coste estimado, usando `last_model` para elegir la tarifa. Formatea en euros con coma decimal y 2 decimales, siempre con el prefijo `≈` (p.ej. `≈ 5,23 €`) porque es una estimacion, no la factura real.
 - **Context peak:** solo incluir la linea si `context_peak` existe en el fichero (indica que hubo al menos una compactacion). Formato: `<tokens> (<percent>% del window)`.
-- **Tokens del turno actual:** no estan contabilizados (el hook `stop` se dispara despues del comentario). La cifra es una cota inferior aceptable — indicalo en el commit o en la documentacion si es relevante, pero no en el comentario Jira estandar.
+- **Cambios OpenSpec archivados:** si `openspec_change` es una lista de mas de un elemento, listar el original y cada delta con su `type` (`scope` o `functional`). Si es una lista de un solo elemento (sin deltas), poner "original" a secas.
+- **Fixes aplicados durante Testing:** si `fixes` no existe o esta vacio, poner "0" u omitir la linea.
+- **Tokens del turno actual:** no estan contabilizados (el hook `stop` se dispara despues del comentario). La cifra es una cota inferior aceptable.
 - **PR(s):** usa la linea singular `**PR:**` si `repos` no existe o tiene un solo elemento; usa el bloque `**PRs:**` (uno por repo) si tiene mas de uno. Omite el/los repo(s) que no recibieron push.
 - **Nunca inventar cifras:** si el bloque `tokens` no existe o `tokens.turns` es 0, omite las lineas de tokens, total, coste y context_peak.
 
-## Flujo de estados Jira
-
-```
-To Do --> In Progress --> In Testing --> Done
-         (Fase A)        (Fase C)       (Fase D: /im-done)
-```
-
-| Transicion | Quien la dispara | Cuando |
-|---|---|---|
-| To Do -> In Progress | Agente (Fase A / `/im-take`) | Al empezar a trabajar en la tarea |
-| In Progress -> In Testing | Agente (Fase C / `/im-close`) | Codigo listo, PR creado, pendiente validacion humana |
-| In Testing -> Done | Agente (Fase D / `/im-done`) | Usuario confirma que sus pruebas manuales son satisfactorias |
-
-**Importante:** la transicion "In Testing" -> "Done" NUNCA es automatica. Requiere que el usuario ejecute `/im-done` tras validar manualmente el feature.
-
-Transiciones por nombre via `getTransitionsForJiraIssue` (los IDs varian entre proyectos). Cachear el mapa por proyecto en `.intermarkit/cache/jira-transitions-{PROJECT}.json` (TTL 7d).
-
-## Plantilla de comentario Jira — `/im-done` (Fase D)
+## Plantilla de comentario Jira — `/im-fix` (bug durante Testing)
 
 `addCommentToJiraIssue` con `contentFormat: "markdown"`:
 
 ```
-**Validacion manual completada** (via IntermarkIt Dev Plugin)
+**Bug corregido durante Testing** (via IntermarkIt Dev Plugin)
 
-- **Validado por:** usuario (pruebas manuales)
-- **Iteraciones de fix:** N (o "ninguna" si no hubo fixes post-PR)
-- **Estado:** feature validado y funcionando correctamente
+- **Descripcion:** [descripcion breve del bug reportado]
+- **Gates reseteados:** `verify_passed`, `tests_passed`, `quality_ok`  ← los que aplicaron
+- **Verificacion tras fix:** verify + tests + coverage + quality OK
+- **Estado:** vuelto a Testing, esperando prueba del usuario
 ```
 
-Si hubo fixes durante Fase D, anadir detalle:
+Este comentario es opcional (a criterio del agente segun la severidad del fix); los fixes triviales pueden acumularse en un solo comentario final en `/im-accept`. Los fixes significativos que valga la pena rastrear en Jira se comentan tras cada `/im-fix`.
+
+## Plantilla de comentario Jira — `/im-delta` (nuevo delta desde Testing)
+
+`addCommentToJiraIssue` con `contentFormat: "markdown"`:
 
 ```
-- **Fixes aplicados durante testing:**
-  - `{hash-corto}` — descripcion breve del fix 1
-  - `{hash-corto}` — descripcion breve del fix 2
+**Delta creado desde Testing** (via IntermarkIt Dev Plugin)
+
+- **Delta:** `PROJ-XXX-add-user-auth-delta-1`
+- **Tipo:** scope | functional
+- **Razon:** [1-2 lineas: por que hace falta el delta]
+- **Estado Jira:** vuelto a Ready, esperando aprobacion de propuesta del delta
 ```
+
+## Plantilla de comentario Jira — `/im-done` (Done, tras merge)
+
+`addCommentToJiraIssue` con `contentFormat: "markdown"`:
+
+```
+**Tarea cerrada** (via IntermarkIt Dev Plugin)
+
+- **PR mergeado:** [enlace al PR mergeado]
+- **Rama:** `feature/PROJ-XXX-slug`
+- **Estado:** feature en `main`, tarea completada
+```
+
+**Variante multi-repo:**
+
+```
+- **PRs mergeados:**
+  - frontend: [enlace]
+  - backend: [enlace]
+```
+
+## Flujo de estados Jira
+
+```
+Nueva  →  Ready  →  En Progreso  →  Testing  ⇌  ({/im-fix} bug local)
+                                              →  Ready (delta) → En Progreso → Testing
+                                              →  Aceptacion  →  Done
+```
+
+| Transicion | Quien la dispara | Cuando |
+|---|---|---|
+| Nueva -> Ready | Agente de refinamiento (fuera de esta version del plugin) | Cuando el issue esta refinado y listo para trabajar |
+| Ready -> En Progreso | Agente (`/im-execute`) | Usuario aprueba la propuesta OpenSpec |
+| En Progreso -> Testing | Agente (`/im-execute`) | Todos los gates de calidad pasan (verify, adversarial, tests, coverage, quality) |
+| Testing -> Testing (loop) | Agente (`/im-fix`) | Bug detectado. La spec no cambia. Solo se resetean los gates de calidad afectados |
+| Testing -> Ready (delta) | Agente (`/im-delta`) | Scope o cambio funcional. Se crea sibling OpenSpec y se reinicia el ciclo |
+| Testing -> Aceptacion | Agente (`/im-accept`) | Usuario confirma que el feature funciona en local. Push + PR + archive |
+| Aceptacion -> Done | Agente (`/im-done`) | Usuario confirma que el PR se ha mergeado |
+
+**Importante:** las transiciones `Testing -> Aceptacion` (push a remoto) y `Aceptacion -> Done` (cierre de tarea) NUNCA son automaticas. Requieren accion explicita del usuario invocando `/im-accept` y `/im-done` (o frases naturales equivalentes segun el mapa de enrutamiento §10 de la regla global).
+
+Transiciones por nombre via `getTransitionsForJiraIssue` (los IDs varian entre proyectos). Cachear el mapa por proyecto en `.intermarkit/cache/jira-transitions-{PROJECT}.json` (TTL 7d). El agente empareja nombres de estados con tolerancia a diferencias tipograficas (espacios, mayusculas, acentos).
